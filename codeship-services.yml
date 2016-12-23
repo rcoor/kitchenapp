@@ -1,6 +1,6 @@
 version: '2'
 services:
-  kitchen-app:
+  kitchenapp:
     container_name: kitchenapp
     build: .
     command: "npm build --prod"
