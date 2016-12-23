@@ -1,5 +1,5 @@
 FROM node:6.9.1
-
+MAINTAINER Theis Jakobsen <thornjakobsen@gmail.com>
 RUN useradd --user-group --create-home --shell /bin/false app
 
 ENV APP_NAME "kitchen-app"
