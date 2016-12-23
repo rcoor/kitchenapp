@@ -1,0 +1,12 @@
+version: '2'
+services:
+  kitchen-app:
+    container_name: kitchen-app
+    build: .
+    command: "npm start -- --host=0.0.0.0"
+    ports:
+      - 4200:4200
+      - 49152:49152
+    volumes:
+      - .:/home/app/kitchen-app
+      - /home/app/kitchen-app/node_modules
