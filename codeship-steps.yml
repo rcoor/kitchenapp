@@ -1,4 +1,0 @@
-service: app
-tag: master
-service: app
-command: echo foo

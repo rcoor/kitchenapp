@@ -1,0 +1,16 @@
+@import url('https://fonts.googleapis.com/css?family=Roboto:100,300,400,500');
+
+* {
+    font-family: 'Roboto', sans-serif;
+}
+.flex-container {
+  display: -webkit-flex; /* Safari */
+  display: flex;
+
+-webkit-flex-flow: column wrap;
+  flex-flow: column wrap;
+}
+
+.main {
+    padding: 30px;
+}
