@@ -5,4 +5,25 @@
     text-align: center;
     line-height: 42px;
     font-size: 14px;
+    position: relative;
 }
+
+div.list > * {
+ display: inline-block;
+}
+
+.left {
+    position: absolute;
+    left: 30px;
+    top: 8px;
+    color: #0084ff;
+    cursor: pointer;
+}
+
+.right {
+    position: absolute;
+    right: 30px;
+}
+
+
+
