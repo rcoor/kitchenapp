@@ -1,3 +1,7 @@
-- name: foo_step
+- name: startproject
   service: kitchenapp
-  command: echo foo
+  command: ng build --prod
+
+- service: startproject
+  type: push
+  command: /deploy/git_push.sh
