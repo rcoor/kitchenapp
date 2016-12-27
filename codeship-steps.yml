@@ -2,6 +2,6 @@
   service: kitchenapp
   command: ng build --prod
 
-- service: startproject
+- service: kitchenapp
   type: push
   command: /deploy/git_push.sh
