@@ -14,5 +14,6 @@ REMOTE_BRANCH=${REMOTE_BRANCH:?'You need to configure the REMOTE_BRANCH environm
 
 set -e
 
-git fetch --unshallow || true
+# git fetch --unshallow || true
+git remote add origin "${REMOTE_REPOSITORY}"
 git push "${REMOTE_REPOSITORY}" "${CI_COMMIT_ID}:${REMOTE_BRANCH}"

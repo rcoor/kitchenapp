@@ -1,4 +1,4 @@
 
 - name: pushproject
   service: push
-  command: /deploy/deploy/git_push.sh
+  command: sh /deploy/deploy/git_push.sh
