@@ -3,8 +3,4 @@ kitchenapp:
     image: codeship/kitchenapp
     dockerfile_path: Dockerfile
 
-push:
-  image: codeship/kitchenapp
-  env_file: deployment.env
-  volumes:
-    - ./:/deploy
+
