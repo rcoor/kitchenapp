@@ -13,6 +13,6 @@ REMOTE_REPOSITORY=${REMOTE_REPOSITORY:?'You need to configure the REMOTE_REPOSIT
 REMOTE_BRANCH=${REMOTE_BRANCH:?'You need to configure the REMOTE_BRANCH environment variable!'}
 
 set -e
-
+ssh-keyscan -t rsa github.com > ~/.ssh/known_hosts
 git fetch # --unshallow || true
 git push -f "${REMOTE_REPOSITORY}" "${REMOTE_BRANCH}"
