@@ -2,3 +2,8 @@ kitchenapp:
   build:
     image: codeship/kitchenapp
     dockerfile_path: Dockerfile
+
+push:
+  image: codeship/kitchenapp
+  volumes:
+    - ./:/deploy
