@@ -37,10 +37,12 @@ export class TalentComponent implements OnInit {
   ngOnInit() {
   }
 
-  getStyle(talentId) {
-    const colors = ['#0084ff', '#44bec7', '#ffc300', '#df3544', '#d696bb', '#6699cc', '#13cf13', '#ff7e29', '#e68585', '#7646ff', '#20cef5', '#67b868', '#d4a88c', '#ff5ca1', '#a695c7']
-    return colors[talentId - 1];
+  filterByValue(talents: Array<Object>) {
+    if (talents)
+    talents.sort(function (a, b) { return (b['points'] > a['points']) ? 1 : ((a['points'] > b['points']) ? -1 : 0); });
+    return talents;
   }
+
 
   clickTalent(talentIndex) {
     this.talentObject = this.talents[talentIndex];

@@ -1,6 +1,7 @@
-<div *ngFor="let talent of talents; let i = index;" class="talent" [style.background-color]="getStyle(talent.id)" (click)="clickTalent(i)">
-  <span style="text-transform: capitalize">{{ talent.name }}</span> {{talent.points}}
+<div *ngFor="let talent of filterByValue(talents); let i = index;" class="talent" [style.background-color]="talent.color" (click)="clickTalent(i)">
+  <span style="text-transform: capitalize">{{ talent.name }}</span><span class="points"> {{talent.points}} </span>
 </div>
+
 <div (@talentState.done)="animationDone()" [@talentState]="talentState" style="position: absolute; top: 20%; left: 0; right: 0; margin: 0 auto; font-size: 100px; text-align: center;"> 🎉
-<br> Well done <span style="text-transform: capitalize">{{talentObject?.name}}!</span><br><span style="font-size: 30%; line-height: 0px;"> You got a {{talentObject?.points}} streak</span>
+<br> Well done <span style="text-transform: capitalize">{{talentObject?.name}}!</span><br><span style="font-size: 30%; line-height: 0px;"> You got a {{talentObject?.points + 1}} streak</span>
 </div>

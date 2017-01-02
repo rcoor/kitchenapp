@@ -4,11 +4,14 @@ import { FormsModule } from '@angular/forms';
 import { HttpModule } from '@angular/http';
 
 import { AppComponent } from './app.component';
+import { AppRoutingModule } from './app-routing.module';
+
 import { AngularFireModule } from 'angularfire2';
 import { HeaderComponent } from './header/header.component';
 import { FooterComponent } from './footer/footer.component';
 import { TalentComponent } from './talent/talent.component';
 import { TalentsPageComponent } from './talents-page/talents-page.component';
+import { AddTalentComponent } from './add-talent/add-talent.component';
 
 // Must export the config
 export const firebaseConfig = {
@@ -24,12 +27,14 @@ export const firebaseConfig = {
     HeaderComponent,
     FooterComponent,
     TalentComponent,
-    TalentsPageComponent
+    TalentsPageComponent,
+    AddTalentComponent
   ],
   imports: [
     BrowserModule,
     FormsModule,
     HttpModule,
+    AppRoutingModule,
     AngularFireModule.initializeApp(firebaseConfig)
   ],
   providers: [],

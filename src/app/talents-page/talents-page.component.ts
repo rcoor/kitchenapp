@@ -31,5 +31,4 @@ export class TalentsPageComponent implements OnInit {
     console.log(talent.$key);
   }
 
-
 }

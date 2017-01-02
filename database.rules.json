@@ -1,0 +1,12 @@
+{
+  "rules": {
+    "talents": {
+      ".read": "true",
+      ".write": "false",
+      "$talent": {
+        ".read": "true",
+        ".write": "true"
+      }
+    }
+  }
+}

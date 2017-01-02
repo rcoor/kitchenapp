@@ -1,13 +1,14 @@
 <div class="nav">
   <div class="list">
     <div class="left">
-      <i class="material-icons">plus_one</i>
+      <span *ngIf="path == '/'"><i class="material-icons" [routerLink]="['/add']">plus_one</i></span>
+      <span *ngIf="path == '/add'" [routerLink]="['/']">Back</span>
     </div>
     <div class="center">
       {{ title }}
     </div>
     <div class="right">
-  <!--    right-->
+      <a class="edit" (click)="editTalents()">Edit</a>
     </div>
   </div>
 </div>

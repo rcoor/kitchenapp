@@ -1,7 +1,7 @@
 <div class="flex-container">
-  <app-header></app-header>
+  <app-header [path]="path"></app-header>
   <div class="main">
-    <app-talents-page></app-talents-page>
+    <router-outlet></router-outlet>
   </div>
   <app-footer></app-footer>
 </div>

@@ -3,8 +3,14 @@
     background: #0082fc;
     color: white;
     font-weight: 300;
-    padding: 6px 12px 6px 12px;
+    padding: 10px 16px 10px 16px;
     margin: 1px;
     position: relative;
     cursor: pointer;
+    font-size: 16px;
+    margin-top: 4px;
+    .points {
+        position: absolute;
+        right: 15px;
+    }
 }
