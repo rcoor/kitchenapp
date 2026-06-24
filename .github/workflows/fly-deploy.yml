@@ -1,0 +1,39 @@
+name: Deploy to Fly.io
+
+# Auto-deploys the SPA to Fly whenever master moves (i.e. when a PR merges),
+# plus a manual trigger. Requires a FLY_API_TOKEN repo secret.
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+env:
+  FLY_APP: helm-trading
+
+jobs:
+  deploy:
+    name: Deploy app
+    runs-on: ubuntu-latest
+    # never run two deploys at once
+    concurrency:
+      group: fly-deploy
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      # Create the app on first run (no-op once it exists). Requires an
+      # org-scoped deploy token; harmless if it already exists.
+      - name: Ensure Fly app exists
+        run: flyctl apps create "$FLY_APP" || echo "app already exists (or create not permitted by token)"
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      # --remote-only builds on Fly's builders, so no local Docker is needed.
+      # The Supabase URL + publishable key come from the Dockerfile build-arg
+      # defaults (both are public client values). --ha=false runs a single
+      # machine to keep it cheap.
+      - name: Deploy
+        run: flyctl deploy --remote-only --ha=false
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

@@ -1,22 +1,25 @@
-FROM node:6.9.1
-MAINTAINER Theis Jakobsen <thornjakobsen@gmail.com>
-RUN useradd --user-group --create-home --shell /bin/false app
+# --- build stage: compile the Vite SPA ---
+FROM node:22-alpine AS build
+WORKDIR /app
 
-ENV APP_NAME "kitchenapp"
-ENV APP_USER "app"
-ENV HOME /home/$APP_USER
-ENV APP_DIR $HOME/$APP_NAME
+COPY package*.json ./
+RUN npm ci
 
-RUN npm install --global angular-cli
+COPY . .
 
-WORKDIR $APP_DIR
-COPY package.json $APP_DIR/package.json
-RUN npm install && npm cache clean
-COPY . $APP_DIR
-RUN chown -R $APP_USER:$APP_USER $HOME/*
+# Public client config (safe to bake — the publishable key ships in the bundle
+# regardless). Override at build time with --build-arg if you point at another
+# Supabase project.
+ARG VITE_SUPABASE_URL=https://xhscpwtvvjalfpzfarqw.supabase.co
+ARG VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_mlTvWERgM5QSY922srcrBA_kWd6z5z_
+ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL
+ENV VITE_SUPABASE_PUBLISHABLE_KEY=$VITE_SUPABASE_PUBLISHABLE_KEY
 
-USER $APP_USER
+RUN npm run build
 
-EXPOSE 4200 49152
-
-CMD ["npm", "start", "--host=0.0.0.0"]
+# --- runtime stage: serve static files with nginx ---
+FROM nginx:1.27-alpine AS runtime
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist /usr/share/nginx/html
+EXPOSE 8080
+CMD ["nginx", "-g", "daemon off;"]

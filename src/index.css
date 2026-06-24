@@ -1,0 +1,92 @@
+@import "tailwindcss";
+
+/* ----------------------------------------------------------------------------
+   Helm design system — dark-first 2026 fintech desk.
+   Near-black canvas, layered glass surfaces, electric accent, tabular numerals.
+---------------------------------------------------------------------------- */
+
+@theme {
+  --font-sans: "Inter", "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+
+  --color-canvas: #08090c;
+  --color-surface: #0e1014;
+  --color-surface-2: #14171d;
+  --color-elevated: #181b22;
+  --color-border: #23262f;
+  --color-border-soft: #1a1d24;
+
+  --color-fg: #eef1f6;
+  --color-muted: #9aa3b2;
+  --color-faint: #5b6373;
+
+  --color-accent: #5eead4;
+  --color-accent-2: #22d3ee;
+  --color-up: #34d399;
+  --color-down: #fb7185;
+  --color-warn: #fbbf24;
+
+  --radius-card: 1rem;
+
+  --shadow-glow: 0 0 0 1px rgba(94, 234, 212, 0.12), 0 8px 40px -12px rgba(34, 211, 238, 0.25);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-canvas);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "ss01";
+  }
+
+  /* subtle ambient gradient + grain on the canvas */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background:
+      radial-gradient(900px 500px at 12% -8%, rgba(34, 211, 238, 0.08), transparent 60%),
+      radial-gradient(800px 500px at 100% 0%, rgba(94, 234, 212, 0.06), transparent 55%);
+  }
+
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    font-family: var(--font-mono);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 999px;
+    border: 2px solid var(--color-canvas);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #2e323d;
+  }
+}
+
+@utility glass {
+  background: color-mix(in oklab, var(--color-surface) 80%, transparent);
+  backdrop-filter: blur(14px) saturate(140%);
+  border: 1px solid var(--color-border);
+}
+
+@utility card {
+  background: linear-gradient(180deg, var(--color-surface-2), var(--color-surface));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+}

@@ -1,8 +1,0 @@
-- name: startproject
-  service: kitchenapp
-  command: ls
-
-- name: pushproject
-  service: push
-  command: sh /deploy/shscripts/git_push.sh
-
