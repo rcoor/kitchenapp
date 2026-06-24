@@ -1,0 +1,29 @@
+# dependencies
+node_modules
+.pnp
+.pnp.js
+
+# build
+dist
+dist-ssr
+*.local
+
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# supabase
+supabase/.temp
+supabase/.branches
+
+# editor / os
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.log
+npm-debug.log*
+
+# claude scratch
+.claude/plans
