@@ -18,9 +18,15 @@ export function LoginPage() {
     setLoading(true);
     try {
       if (mode === "signup") {
-        const { error } = await supabase.auth.signUp({ email, password });
+        const { data, error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
-        toast.success("Account created", "You're signed in.");
+        if (!data.session) {
+          // project requires email confirmation before a session is issued
+          toast.info("Confirm your email", "Check your inbox, then sign in.");
+          setMode("signin");
+        } else {
+          toast.success("Account created", "You're signed in.");
+        }
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;

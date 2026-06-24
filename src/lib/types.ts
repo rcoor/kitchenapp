@@ -19,10 +19,11 @@ export const MODE_BLURBS: Record<Mode, string> = {
 export type Quote = {
   symbol: string;
   price: number;
-  change?: number;
-  changePct?: number;
-  prevClose?: number;
-  asOf?: string;
+  change: number;
+  changePct: number;
+  prevClose: number;
+  asOf: string;
+  source: "alpaca" | "synthetic";
 };
 
 export type Candle = {
