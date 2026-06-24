@@ -63,6 +63,26 @@ Without `ANTHROPIC_API_KEY`, recommendations use the built-in heuristic.
 Without Alpaca keys, market data is deterministic synthetic data and trading
 works in `sim` mode.
 
+## Deploy to Fly.io
+
+The frontend is a static SPA served by nginx; the backend stays on Supabase.
+From a machine with [flyctl](https://fly.io/docs/flyctl/install/) installed and
+`fly auth login` done:
+
+```bash
+fly launch --copy-config --no-deploy   # first time: reuses fly.toml; pick a unique app name
+fly deploy                             # builds the Dockerfile and ships it
+```
+
+`fly.toml` defaults to the `arn` (Stockholm) region next to the Supabase
+project, scales to zero when idle, and runs on a 256 MB shared VM. The Supabase
+URL + publishable key are baked at build time via Docker build args (both are
+public client values); point at a different project with
+`fly deploy --build-arg VITE_SUPABASE_URL=... --build-arg VITE_SUPABASE_PUBLISHABLE_KEY=...`.
+
+After the first deploy, add your Fly app's URL to **Supabase → Authentication →
+URL Configuration** (Site URL / redirect allow-list) so email links resolve.
+
 ## Layout
 
 ```
