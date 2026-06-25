@@ -37,6 +37,28 @@ export function useSignals(limit = 60) {
   });
 }
 
+export type PtrTrade = {
+  ticker: string;
+  type: string | null;
+  txnDate: string | null;
+  amount: string;
+  amountMid: number | null;
+};
+
+/** Parse a single PTR PDF on demand into its individual trades. */
+export function useParsePtr(docUrl: string | null) {
+  return useQuery({
+    queryKey: ["parse-ptr", docUrl],
+    enabled: !!docUrl,
+    staleTime: 1000 * 60 * 60,
+    retry: false,
+    queryFn: async () =>
+      invokeFn<{ ok: boolean; doc_url: string; count: number; trades: PtrTrade[] }>("parse-ptr", {
+        doc_url: docUrl,
+      }),
+  });
+}
+
 export function useGenerateRecommendations() {
   const qc = useQueryClient();
   return useMutation({
