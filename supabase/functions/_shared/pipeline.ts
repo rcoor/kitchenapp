@@ -4,6 +4,19 @@ import { DOMParser } from "https://deno.land/x/deno_dom@v0.1.45/deno-dom-wasm.ts
 import { unzipSync } from "npm:fflate@0.8.2";
 import { XMLParser } from "npm:fast-xml-parser@4.5.0";
 
+// pdf.js can throw from detached internal tasks (e.g. compiling embedded
+// functions), surfacing as an *unhandled* promise rejection that no try/catch
+// can intercept — it would 500 the whole ingest. Contain it so one bad PDF
+// can't kill the run; the affected row simply yields no text.
+try {
+  addEventListener("unhandledrejection", (e: PromiseRejectionEvent) => {
+    console.error("contained unhandledrejection:", e.reason);
+    e.preventDefault();
+  });
+} catch {
+  // addEventListener unavailable in this context — ignore.
+}
+
 // unpdf is loaded lazily (only the PDF path needs it) so a load failure can
 // never take down the other bricks / skills that share this runtime.
 let _unpdf: typeof import("npm:unpdf@^0.12.0") | null = null;
