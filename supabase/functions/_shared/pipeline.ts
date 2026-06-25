@@ -1,6 +1,8 @@
 // Pipeline runtime: executes a skill's ordered "bricks" and returns normalized
 // signal rows. Bricks are plug-and-play; the `transform` brick runs custom JS.
 import { DOMParser } from "https://deno.land/x/deno_dom@v0.1.45/deno-dom-wasm.ts";
+import { unzipSync } from "npm:fflate@0.8.2";
+import { XMLParser } from "npm:fast-xml-parser@4.5.0";
 
 export type Brick = { id: string; type: string; config: Record<string, unknown> };
 export type Pipeline = { steps: Brick[] };
@@ -80,8 +82,43 @@ async function runHttpRequest(cfg: Record<string, unknown>, log: string[]): Prom
   log.push(`http_request ${method} ${url}`);
   const res = await fetch(url, { method, headers });
   if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`);
+  // `as: "bytes"` returns raw binary (e.g. a ZIP) for the unzip brick.
+  if (String(cfg.as ?? "") === "bytes") return new Uint8Array(await res.arrayBuffer());
   const ct = res.headers.get("content-type") ?? "";
   return ct.includes("json") ? await res.json() : await res.text();
+}
+
+// Decompress a ZIP (Uint8Array/ArrayBuffer from a `bytes` http_request) and
+// return one entry as text. `entry` is a case-insensitive regex (default: the
+// first .xml file). Used by the House Clerk bulk financial-disclosure feed.
+function runUnzip(cfg: Record<string, unknown>, input: unknown, log: string[]): string {
+  const bytes = input instanceof Uint8Array
+    ? input
+    : input instanceof ArrayBuffer
+    ? new Uint8Array(input)
+    : null;
+  if (!bytes) throw new Error("unzip: expected binary input (set http_request `as: \"bytes\"`)");
+  const files = unzipSync(bytes);
+  const names = Object.keys(files);
+  const pat = cfg.entry ? new RegExp(String(cfg.entry), "i") : /\.xml$/i;
+  const name = names.find((n) => pat.test(n)) ?? names[0];
+  log.push(`unzip ${names.length} entries, picked ${name ?? "(none)"}`);
+  if (!name) return "";
+  return new TextDecoder().decode(files[name]);
+}
+
+// Parse XML text into objects and select a repeating node as an array of rows.
+// `path` is a $.dotted.path to the repeated element (e.g. the House feed's
+// "$.FinancialDisclosure.Member"). Keys preserve the original XML tag names.
+function runXmlSelect(cfg: Record<string, unknown>, input: unknown, log: string[]): unknown[] {
+  const text = typeof input === "string" ? input : String(input ?? "");
+  const parser = new XMLParser({ ignoreAttributes: false, trimValues: true });
+  const obj = parser.parse(text);
+  const path = String(cfg.path ?? "$");
+  const sel = getPath(obj, path);
+  const arr = Array.isArray(sel) ? sel : sel == null ? [] : [sel];
+  log.push(`xml_select ${path} -> ${arr.length} rows`);
+  return arr;
 }
 
 async function runScrape(cfg: Record<string, unknown>, log: string[]): Promise<unknown[]> {
@@ -144,6 +181,12 @@ export async function runPipeline(
         break;
       case "scrape":
         data = await runScrape(cfg, log);
+        break;
+      case "unzip":
+        data = runUnzip(cfg, data, log);
+        break;
+      case "xml_select":
+        data = runXmlSelect(cfg, data, log);
         break;
       case "json_select":
         data = getPath(data, String(cfg.path ?? "$"));

@@ -16,10 +16,19 @@ back in time and review exactly what happened.
 - **Three execution faces via one interface** — `sim` (offline fill engine with
   modeled fees + slippage), `paper` (Alpaca paper), `live` (Alpaca live, gated).
 - **Data sources as installable, shareable skills.** Each source is a plugin
-  with a customizable **pipeline of bricks** — `http_request`, `scrape` (target a
-  specific element id/selector), `json_select`, `map`, `filter`, `dedupe`,
-  `emit`, plus a **custom-code** brick. Skills can be authored, installed,
-  configured, and shared to a catalog. Senator-trades ships built-in.
+  with a customizable **pipeline of bricks** — `http_request` (JSON, text, or
+  raw `bytes`), `scrape` (target a specific element id/selector), `unzip`,
+  `xml_select`, `json_select`, `map`, `filter`, `dedupe`, `emit`, plus a
+  **custom-code** brick. Skills can be authored, installed, configured, and
+  shared to a catalog. **Senator-trades** and **House-disclosures** ship
+  built-in.
+- **Congressional trades from the primary source.** The `house-disclosures`
+  skill pulls the official Office of the Clerk bulk feed
+  (`disclosures-clerk.house.gov/.../<YEAR>FD.zip`) — fetch ZIP → `unzip` the XML
+  index → emit one signal per Periodic Transaction Report (STOCK Act trade
+  filing), with the representative, filing date, and a link to the PTR PDF. No
+  third-party reseller in the loop. (Ticker-level line items live inside the PTR
+  PDFs — parsing those is a documented follow-up.)
 - **AI recommendations** — `recommend` freezes the exact inputs into an
   immutable snapshot, reasons with Claude (structured output), and stores a
   decision + per-symbol recommendations. Falls back to a transparent heuristic

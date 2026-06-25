@@ -59,7 +59,9 @@ Deno.serve(async (req) => {
     }
 
     const rows = result.signals
-      .filter((s) => s.symbol || s.numeric_value != null)
+      // Keep any non-empty signal: a ticker, a numeric value, or a typed event
+      // (e.g. a House PTR filing, which carries no symbol until its PDF is parsed).
+      .filter((s) => s.symbol || s.numeric_value != null || s.event_type)
       .map((s) => ({
         user_id: user.id,
         installation_id: inst.id,

@@ -7,7 +7,7 @@ import { toast } from "@/components/ui/toast";
 import { useCreateSkill } from "./hooks";
 import { cn } from "@/lib/utils";
 
-type Template = "http_json" | "scrape" | "custom";
+type Template = "http_json" | "scrape" | "zip_xml" | "custom";
 
 const TEMPLATES: Record<Template, { label: string; blurb: string; signalKind: string; configSchema: string; pipeline: string }> = {
   http_json: {
@@ -55,6 +55,29 @@ const TEMPLATES: Record<Template, { label: string; blurb: string; signalKind: st
             },
           },
           { id: "map", type: "map", config: { mapping: { symbol: "$.symbol", event_type: "$.event_type", observed_at: "$.observed_at", payload: { raw: "$" } } } },
+          { id: "emit", type: "emit", config: { signal_kind: "custom" } },
+        ],
+      },
+      null,
+      2,
+    ),
+  },
+  zip_xml: {
+    label: "ZIP / XML feed",
+    blurb: "Fetch a ZIP (e.g. the House Clerk bulk feed), unzip an XML index, map rows.",
+    signalKind: "custom",
+    configSchema: JSON.stringify(
+      [{ key: "url", label: "ZIP URL", type: "string", required: true, default: "https://disclosures-clerk.house.gov/public_disc/financial-pdfs/2026FD.zip" }],
+      null,
+      2,
+    ),
+    pipeline: JSON.stringify(
+      {
+        steps: [
+          { id: "fetch", type: "http_request", config: { url: "{{config.url}}", method: "GET", as: "bytes" } },
+          { id: "unzip", type: "unzip", config: { entry: "\\.xml$" } },
+          { id: "rows", type: "xml_select", config: { path: "$.FinancialDisclosure.Member" } },
+          { id: "map", type: "map", config: { mapping: { event_type: "$.FilingType", observed_at: "$.FilingDate", payload: { name: "$.Last", state: "$.StateDst", doc_id: "$.DocID" } } } },
           { id: "emit", type: "emit", config: { signal_kind: "custom" } },
         ],
       },
@@ -136,7 +159,7 @@ export function SkillAuthor({ open, onClose }: { open: boolean; onClose: () => v
 
   return (
     <Modal open={open} onClose={onClose} title="Create a source skill" className="max-w-2xl">
-      <div className="mb-4 grid grid-cols-3 gap-2">
+      <div className="mb-4 grid grid-cols-2 gap-2">
         {(Object.keys(TEMPLATES) as Template[]).map((t) => (
           <button
             key={t}
