@@ -114,15 +114,17 @@ function runTransform(
   cfg: Record<string, unknown>,
   input: unknown,
   allowCustomCode: boolean,
-): unknown {
+): Promise<unknown> {
   if (!allowCustomCode) {
     throw new Error(
       "Custom-code brick blocked: you may only run custom code from built-in skills or skills you authored.",
     );
   }
   const code = String(cfg.code ?? "return input;");
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval
-  const fn = new Function("input", "config", `"use strict";\n${code}`);
+  // Async so brick code may `await fetch(...)`. Receives (input, config).
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as
+    new (...args: string[]) => (input: unknown, config: unknown) => Promise<unknown>;
+  const fn = new AsyncFunction("input", "config", code);
   return fn(input, cfg);
 }
 
@@ -182,7 +184,7 @@ export async function runPipeline(
         break;
       }
       case "transform":
-        data = runTransform(cfg, data, opts.allowCustomCode);
+        data = await runTransform(cfg, data, opts.allowCustomCode);
         break;
       case "emit":
         if (cfg.signal_kind) signalKind = String(cfg.signal_kind);
