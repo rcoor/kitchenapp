@@ -35,7 +35,11 @@ export function SignalsFeed({ limit = 40 }: { limit?: number }) {
 
 function SignalRow({ s }: { s: Tables<"signals"> }) {
   const payload = (s.payload ?? {}) as Record<string, unknown>;
-  const who = payload.senator ? String(payload.senator) : null;
+  const who = payload.senator
+    ? String(payload.senator)
+    : payload.representative
+    ? String(payload.representative)
+    : null;
   const amount = payload.amount ? String(payload.amount) : null;
   return (
     <div className="flex items-center gap-3 rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-surface)] px-3.5 py-2.5">
