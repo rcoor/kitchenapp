@@ -301,6 +301,66 @@ function runHousePtrParse(input: unknown, log: string[]): Array<Record<string, u
   return out;
 }
 
+// Turn an array of House filings (each with doc_url + metadata) into ticker-level
+// trade signals by delegating each PDF to the `parse-ptr` edge function. Running
+// pdf.js in a SEPARATE function invocation per PDF means a crash on one bad PDF
+// 500s only that subrequest (skipped here) — it can never tear down this ingest.
+async function runParsePtrs(
+  cfg: Record<string, unknown>,
+  input: unknown,
+  log: string[],
+): Promise<Array<Record<string, unknown>>> {
+  const rows = Array.isArray(input) ? (input as Record<string, unknown>[]) : [];
+  const fn = String(cfg.fn ?? "parse-ptr");
+  const base = Deno.env.get("SUPABASE_URL") ?? "";
+  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+  const out: Array<Record<string, unknown>> = [];
+  let ok = 0;
+  for (const f of rows) {
+    const docUrl = f.doc_url ? String(f.doc_url) : "";
+    if (!docUrl) continue;
+    try {
+      const res = await fetch(`${base}/functions/v1/${fn}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", apikey: key, authorization: `Bearer ${key}` },
+        body: JSON.stringify({ doc_url: docUrl }),
+      });
+      if (!res.ok) {
+        log.push(`${fn} ${f.doc_id}: HTTP ${res.status} (skipped)`);
+        continue;
+      }
+      const data = (await res.json()) as { trades?: Array<Record<string, unknown>> };
+      const trades = Array.isArray(data?.trades) ? data.trades : [];
+      trades.forEach((t, i) => {
+        out.push({
+          symbol: t.ticker,
+          event_type: t.type ?? "transaction",
+          observed_at: t.txnDate ?? f.filing_date ?? null,
+          numeric_value: t.amountMid ?? null,
+          payload: {
+            representative: f.representative ?? null,
+            state_district: f.state_district ?? null,
+            transaction_type: t.type ?? null,
+            amount: t.amount ?? null,
+            doc_id: f.doc_id ?? null,
+            doc_url: docUrl,
+            year: f.year ?? null,
+          },
+          dedupe_key:
+            [f.doc_id, t.ticker, t.type, t.txnDate, t.amountMid].filter((x) => x != null).join("|") ||
+            `${f.doc_id}|${i}`,
+        });
+      });
+      ok++;
+      log.push(`${fn} ${f.doc_id}: ${trades.length} trades`);
+    } catch (e) {
+      log.push(`${fn} ${f.doc_id}: ${(e as Error).message} (skipped)`);
+    }
+  }
+  log.push(`parse_ptrs ${ok}/${rows.length} filings parsed, ${out.length} trades`);
+  return out;
+}
+
 async function runScrape(cfg: Record<string, unknown>, log: string[]): Promise<unknown[]> {
   const url = String(cfg.url ?? "");
   const rowSelector = String(cfg.rowSelector ?? cfg.row_selector ?? "");
@@ -377,6 +437,9 @@ export async function runPipeline(
         break;
       case "house_ptr_parse":
         data = runHousePtrParse(data, log);
+        break;
+      case "parse_ptrs":
+        data = await runParsePtrs(cfg, data, log);
         break;
       case "json_select":
         data = getPath(data, String(cfg.path ?? "$"));
