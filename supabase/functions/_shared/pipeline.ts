@@ -3,7 +3,14 @@
 import { DOMParser } from "https://deno.land/x/deno_dom@v0.1.45/deno-dom-wasm.ts";
 import { unzipSync } from "npm:fflate@0.8.2";
 import { XMLParser } from "npm:fast-xml-parser@4.5.0";
-import { extractText, getDocumentProxy } from "npm:unpdf@^0.12.0";
+
+// unpdf is loaded lazily (only the PDF path needs it) so a load failure can
+// never take down the other bricks / skills that share this runtime.
+let _unpdf: typeof import("npm:unpdf@^0.12.0") | null = null;
+async function loadUnpdf() {
+  if (!_unpdf) _unpdf = await import("npm:unpdf@^0.12.0");
+  return _unpdf;
+}
 
 export type Brick = { id: string; type: string; config: Record<string, unknown> };
 export type Pipeline = { steps: Brick[] };
@@ -184,6 +191,7 @@ async function runPdfText(
       continue;
     }
     try {
+      const { extractText, getDocumentProxy } = await loadUnpdf();
       const pdf = await getDocumentProxy(bytes);
       const { text } = await extractText(pdf, { mergePages: true });
       row[into] = Array.isArray(text) ? text.join("\n") : String(text ?? "");
