@@ -87,7 +87,9 @@ Deno.serve(async (req) => {
     const bytes = new Uint8Array(await res.arrayBuffer());
 
     const { extractText, getDocumentProxy } = await import("npm:unpdf@^0.12.0");
-    const pdf = await getDocumentProxy(bytes);
+    // isEvalSupported:false stops pdf.js compiling embedded PostScript functions
+    // via `new Function` (can throw "unsupported Unicode escape sequence" here).
+    const pdf = await getDocumentProxy(bytes, { isEvalSupported: false });
     const { text } = await extractText(pdf, { mergePages: true });
     const full = Array.isArray(text) ? text.join("\n") : String(text ?? "");
 

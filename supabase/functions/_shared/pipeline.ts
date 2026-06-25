@@ -192,7 +192,10 @@ async function runPdfText(
     }
     try {
       const { extractText, getDocumentProxy } = await loadUnpdf();
-      const pdf = await getDocumentProxy(bytes);
+      // isEvalSupported:false stops pdf.js from compiling embedded PostScript
+      // (Type-4) functions via `new Function`, which can throw "unsupported
+      // Unicode escape sequence" in the edge runtime and crash the whole run.
+      const pdf = await getDocumentProxy(bytes, { isEvalSupported: false });
       const { text } = await extractText(pdf, { mergePages: true });
       row[into] = Array.isArray(text) ? text.join("\n") : String(text ?? "");
       ok++;
@@ -339,6 +342,7 @@ export async function runPipeline(
 
   for (const step of steps) {
     const cfg = step.config ?? {};
+    try {
     switch (step.type) {
       case "http_request":
         data = await runHttpRequest(cfg, log);
@@ -405,6 +409,11 @@ export async function runPipeline(
         break;
       default:
         log.push(`unknown brick "${step.type}" skipped`);
+    }
+    } catch (e) {
+      // Name the failing brick so the stored last_error is actionable.
+      console.error(`brick "${step.type}" (${step.id ?? "?"}) failed:`, (e as Error).stack ?? e);
+      throw new Error(`brick "${step.type}" (${step.id ?? "?"}): ${(e as Error).message}`);
     }
   }
 
