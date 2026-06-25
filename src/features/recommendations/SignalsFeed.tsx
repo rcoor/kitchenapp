@@ -1,4 +1,4 @@
-import { Landmark, Activity, Newspaper } from "lucide-react";
+import { Landmark, Activity, Newspaper, Building2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/common";
 import { relativeTime } from "@/lib/utils";
@@ -7,6 +7,7 @@ import type { Tables } from "@/lib/database.types";
 
 function iconFor(kind: string) {
   if (kind === "senator_trade") return <Landmark className="h-4 w-4 text-[var(--color-accent)]" />;
+  if (kind === "house_disclosure") return <Building2 className="h-4 w-4 text-[var(--color-accent)]" />;
   if (kind === "news") return <Newspaper className="h-4 w-4 text-[var(--color-accent)]" />;
   return <Activity className="h-4 w-4 text-[var(--color-accent)]" />;
 }

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Boxes, Plus, Play, Trash2, Landmark, Code2, Globe, Share2, Lock, CheckCircle2, AlertTriangle } from "lucide-react";
+import { Boxes, Plus, Play, Trash2, Landmark, Building2, Code2, Globe, Share2, Lock, CheckCircle2, AlertTriangle } from "lucide-react";
 import { PageHeader, EmptyState } from "@/components/common";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ import type { ConfigField } from "@/lib/types";
 
 function skillIcon(slug: string, kind: string) {
   if (slug.includes("senator") || kind === "senator_trade") return <Landmark className="h-5 w-5" />;
+  if (slug.includes("house") || kind === "house_disclosure") return <Building2 className="h-5 w-5" />;
   if (slug.includes("code")) return <Code2 className="h-5 w-5" />;
   return <Globe className="h-5 w-5" />;
 }
