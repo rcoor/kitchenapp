@@ -23,7 +23,7 @@ import type { ConfigField } from "@/lib/types";
 
 function skillIcon(slug: string, kind: string) {
   if (slug.includes("senator") || kind === "senator_trade") return <Landmark className="h-5 w-5" />;
-  if (slug.includes("house") || kind === "house_disclosure") return <Building2 className="h-5 w-5" />;
+  if (slug.includes("house") || kind === "house_disclosure" || kind === "house_trade") return <Building2 className="h-5 w-5" />;
   if (slug.includes("code")) return <Code2 className="h-5 w-5" />;
   return <Globe className="h-5 w-5" />;
 }

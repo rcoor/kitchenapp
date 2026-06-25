@@ -3,6 +3,7 @@
 import { DOMParser } from "https://deno.land/x/deno_dom@v0.1.45/deno-dom-wasm.ts";
 import { unzipSync } from "npm:fflate@0.8.2";
 import { XMLParser } from "npm:fast-xml-parser@4.5.0";
+import { extractText, getDocumentProxy } from "npm:unpdf@^0.12.0";
 
 export type Brick = { id: string; type: string; config: Record<string, unknown> };
 export type Pipeline = { steps: Brick[] };
@@ -121,6 +122,161 @@ function runXmlSelect(cfg: Record<string, unknown>, input: unknown, log: string[
   return arr;
 }
 
+// Resolve {{field}} / {{a.b}} templates against a single row object.
+function resolveRowTemplate(tmpl: string, row: Record<string, unknown>): string {
+  return tmpl.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_m, p: string) => String(getPath(row, p) ?? ""));
+}
+
+// For each row in the input array, fetch a per-row URL (templated against the
+// row) and attach the response under `into`. `as: "bytes"` keeps binary (PDFs);
+// otherwise text. Errors are recorded per row instead of aborting the run.
+async function runHttpEach(
+  cfg: Record<string, unknown>,
+  input: unknown,
+  log: string[],
+): Promise<unknown[]> {
+  const rows = Array.isArray(input) ? (input as Record<string, unknown>[]) : [];
+  const tmpl = String(cfg.url ?? "");
+  const into = String(cfg.into ?? "_fetched");
+  const asBytes = String(cfg.as ?? "") === "bytes";
+  const headers = {
+    "user-agent": "HelmBot/1.0",
+    ...((cfg.headers as Record<string, string>) ?? {}),
+  };
+  const limit = Number(cfg.limit ?? rows.length);
+  const slice = rows.slice(0, limit);
+  let ok = 0;
+  for (const row of slice) {
+    const url = resolveRowTemplate(tmpl, row);
+    try {
+      const res = await fetch(url, { headers });
+      if (!res.ok) {
+        row[into] = null;
+        row[`${into}_error`] = `HTTP ${res.status}`;
+      } else {
+        row[into] = asBytes ? new Uint8Array(await res.arrayBuffer()) : await res.text();
+        ok++;
+      }
+    } catch (e) {
+      row[into] = null;
+      row[`${into}_error`] = (e as Error).message;
+    }
+  }
+  log.push(`http_each ${ok}/${slice.length} fetched (${asBytes ? "bytes" : "text"})`);
+  return slice;
+}
+
+// For each row, extract text from a PDF held under `from` (Uint8Array) into
+// `into`, then drop the heavy bytes. Powered by unpdf (serverless pdf.js).
+async function runPdfText(
+  cfg: Record<string, unknown>,
+  input: unknown,
+  log: string[],
+): Promise<unknown[]> {
+  const rows = Array.isArray(input) ? (input as Record<string, unknown>[]) : [];
+  const from = String(cfg.from ?? "_fetched");
+  const into = String(cfg.into ?? "_text");
+  let ok = 0;
+  for (const row of rows) {
+    const bytes = row[from];
+    if (!(bytes instanceof Uint8Array)) {
+      row[into] = "";
+      continue;
+    }
+    try {
+      const pdf = await getDocumentProxy(bytes);
+      const { text } = await extractText(pdf, { mergePages: true });
+      row[into] = Array.isArray(text) ? text.join("\n") : String(text ?? "");
+      ok++;
+    } catch (e) {
+      row[into] = "";
+      row[`${into}_error`] = (e as Error).message;
+    }
+    delete row[from];
+  }
+  log.push(`pdf_text extracted ${ok}/${rows.length}`);
+  return rows;
+}
+
+// Parse the text of a US House Periodic Transaction Report into individual
+// trades. The official PDFs have no machine-readable schema, so this is a
+// tolerant, best-effort parser keyed off the amount-range column that anchors
+// each transaction line. Returns signal-shaped rows (one per trade).
+function parseHousePtr(text: string): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = [];
+  if (!text) return out;
+  const norm = text.replace(/ /g, " ").replace(/[–—]/g, "-");
+  const amountRe = /\$([\d,]+)\s*-\s*\$([\d,]+)/g;
+  let m: RegExpExecArray | null;
+  let prevEnd = 0; // each amount range ends a transaction line; window = text since the last one
+  while ((m = amountRe.exec(norm)) !== null) {
+    const win = norm.slice(prevEnd, m.index);
+    prevEnd = m.index + m[0].length;
+    const tickers = [...win.matchAll(/\(([A-Z]{1,5})\)/g)];
+    const ticker = tickers.length ? tickers[tickers.length - 1][1] : null;
+    if (!ticker) continue; // skip non-ticker assets (real estate, funds w/o symbol)
+    let type: string | null = null;
+    if (/\bpurchase\b/i.test(win)) type = "purchase";
+    else if (/\bsale\b/i.test(win)) type = "sale";
+    else if (/\bexchange\b/i.test(win)) type = "exchange";
+    else {
+      const codes = win.match(/(?<![A-Za-z])[PSE](?![A-Za-z)])/g);
+      const code = codes ? codes[codes.length - 1] : null;
+      type = code === "P" ? "purchase" : code === "S" ? "sale" : code === "E" ? "exchange" : null;
+    }
+    const dates = [...win.matchAll(/\b(\d{1,2}\/\d{1,2}\/\d{4})\b/g)];
+    const txnDate = dates.length ? dates[0][1] : null;
+    const low = Number(m[1].replace(/,/g, ""));
+    const high = Number(m[2].replace(/,/g, ""));
+    out.push({
+      ticker,
+      type,
+      txnDate,
+      amountRange: `$${m[1]} - $${m[2]}`,
+      amountLow: low,
+      amountHigh: high,
+      amountMid: Number.isFinite(low) && Number.isFinite(high) ? Math.round((low + high) / 2) : null,
+      snippet: win.slice(-90).replace(/\s+/g, " ").trim(),
+    });
+  }
+  return out;
+}
+
+// Flatten an array of House filings (each carrying `_text` + member metadata)
+// into ticker-level trade signals via parseHousePtr.
+function runHousePtrParse(input: unknown, log: string[]): Array<Record<string, unknown>> {
+  const rows = Array.isArray(input) ? (input as Record<string, unknown>[]) : [];
+  const out: Array<Record<string, unknown>> = [];
+  for (const f of rows) {
+    const txns = parseHousePtr(String(f._text ?? ""));
+    txns.forEach((t, i) => {
+      out.push({
+        symbol: t.ticker,
+        event_type: t.type ?? "transaction",
+        observed_at: t.txnDate ?? f.filing_date ?? null,
+        numeric_value: t.amountMid,
+        payload: {
+          representative: f.representative ?? null,
+          state_district: f.state_district ?? null,
+          transaction_type: t.type,
+          amount: t.amountRange,
+          amount_low: t.amountLow,
+          amount_high: t.amountHigh,
+          doc_id: f.doc_id ?? null,
+          doc_url: f.doc_url ?? null,
+          year: f.year ?? null,
+          snippet: t.snippet,
+        },
+        dedupe_key:
+          [f.doc_id, t.ticker, t.type, t.txnDate, t.amountMid].filter((x) => x != null).join("|") ||
+          `${f.doc_id}|${i}`,
+      });
+    });
+    log.push(`house_ptr_parse ${f.doc_id}: ${txns.length} trades`);
+  }
+  return out;
+}
+
 async function runScrape(cfg: Record<string, unknown>, log: string[]): Promise<unknown[]> {
   const url = String(cfg.url ?? "");
   const rowSelector = String(cfg.rowSelector ?? cfg.row_selector ?? "");
@@ -187,6 +343,15 @@ export async function runPipeline(
         break;
       case "xml_select":
         data = runXmlSelect(cfg, data, log);
+        break;
+      case "http_each":
+        data = await runHttpEach(cfg, data, log);
+        break;
+      case "pdf_text":
+        data = await runPdfText(cfg, data, log);
+        break;
+      case "house_ptr_parse":
+        data = runHousePtrParse(data, log);
         break;
       case "json_select":
         data = getPath(data, String(cfg.path ?? "$"));
