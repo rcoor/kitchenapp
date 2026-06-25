@@ -194,7 +194,7 @@ function buildPrompt(
     .slice(0, 60)
     .map((s) => {
       const p = (s.payload ?? {}) as Record<string, unknown>;
-      const who = p.senator ? ` by ${p.senator}` : "";
+      const who = p.senator ? ` by ${p.senator}` : p.representative ? ` by ${p.representative}` : "";
       const amt = p.amount ? ` ${p.amount}` : "";
       return `- [${s.skill_slug}] ${s.symbol}: ${s.event_type}${who}${amt} @ ${s.observed_at ?? "?"}`;
     })
@@ -234,11 +234,11 @@ function heuristic(
     if (buys > sells) {
       action = "buy";
       confidence = Math.min(0.85, 0.5 + 0.1 * (buys - sells));
-      reasons.push(`${buys} senator purchase signal(s) vs ${sells} sale(s)`);
+      reasons.push(`${buys} congressional purchase signal(s) vs ${sells} sale(s)`);
     } else if (sells > buys) {
       action = "sell";
       confidence = Math.min(0.85, 0.5 + 0.1 * (sells - buys));
-      reasons.push(`${sells} senator sale signal(s) vs ${buys} purchase(s)`);
+      reasons.push(`${sells} congressional sale signal(s) vs ${buys} purchase(s)`);
     } else {
       reasons.push("no decisive alternative signal");
     }

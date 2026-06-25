@@ -17,18 +17,24 @@ back in time and review exactly what happened.
   modeled fees + slippage), `paper` (Alpaca paper), `live` (Alpaca live, gated).
 - **Data sources as installable, shareable skills.** Each source is a plugin
   with a customizable **pipeline of bricks** — `http_request` (JSON, text, or
-  raw `bytes`), `scrape` (target a specific element id/selector), `unzip`,
-  `xml_select`, `json_select`, `map`, `filter`, `dedupe`, `emit`, plus a
-  **custom-code** brick. Skills can be authored, installed, configured, and
-  shared to a catalog. **Senator-trades** and **House-disclosures** ship
-  built-in.
-- **Congressional trades from the primary source.** The `house-disclosures`
-  skill pulls the official Office of the Clerk bulk feed
-  (`disclosures-clerk.house.gov/.../<YEAR>FD.zip`) — fetch ZIP → `unzip` the XML
-  index → emit one signal per Periodic Transaction Report (STOCK Act trade
-  filing), with the representative, filing date, and a link to the PTR PDF. No
-  third-party reseller in the loop. (Ticker-level line items live inside the PTR
-  PDFs — parsing those is a documented follow-up.)
+  raw `bytes`), `http_each` (per-row fetch), `scrape` (target a specific element
+  id/selector), `unzip`, `xml_select`, `pdf_text`, `house_ptr_parse`,
+  `json_select`, `map`, `filter`, `dedupe`, `emit`, plus a **custom-code** brick.
+  Skills can be authored, installed, configured, and shared to a catalog.
+  **Senator-trades**, **House-disclosures**, and **House-trades** ship built-in.
+- **Congressional trades from the primary source.** Both House skills pull the
+  official Office of the Clerk bulk feed
+  (`disclosures-clerk.house.gov/.../<YEAR>FD.zip`) — no third-party reseller in
+  the loop:
+  - `house-disclosures` — fetch ZIP → `unzip` the XML index → one signal per
+    Periodic Transaction Report *filing* (representative, filing date, PTR PDF
+    link). Cheap and fast.
+  - `house-trades` — **tradeable, ticker-level**: for each recent PTR it
+    `http_each`-fetches the PDF, runs `pdf_text` (unpdf) → `house_ptr_parse`,
+    emitting one signal per transaction with a real **ticker**, **buy/sell**
+    type, and **dollar amount** — exactly the per-symbol shape the recommend
+    engine reasons over. (The PTR PDFs have no machine-readable schema, so the
+    parser is tolerant/best-effort and tuned against live output.)
 - **AI recommendations** — `recommend` freezes the exact inputs into an
   immutable snapshot, reasons with Claude (structured output), and stores a
   decision + per-symbol recommendations. Falls back to a transparent heuristic
