@@ -1,0 +1,5 @@
+# Airflow is only needed on the scheduler/worker that runs the DAG. Pin to your
+# platform's supported version + constraints file, e.g.:
+#   pip install "apache-airflow==2.10.4" \
+#     -c "https://raw.githubusercontent.com/apache/airflow/constraints-2.10.4/constraints-3.11.txt"
+apache-airflow>=2.9,<3.0
