@@ -1,37 +1,49 @@
 # Enova — Norwegian Energy Labels ingest + API
 
-Sources **all Norwegian building energy certificates** (energiattester,
-`energikarakter` A–G) from [Enova's public-data API](https://data.enova.no) and
-exposes them over a FastAPI. An Airflow DAG runs the ingest on a schedule; the
-same ingest code runs from the CLI and the tests.
+Sources **all published Norwegian building energy certificates** (energiattester,
+`energikarakter` A–G) from [Enova's public-data API](https://data.enova.no) into
+**Postgres** and exposes them over a **FastAPI**. An **Airflow DAG** runs the
+ingest on a schedule; the same code runs from the CLI and the tests.
 
-Enova's v2 "offentlige data" service publishes the full attest set as **one bulk
-file per calendar month**:
-
-```
-GET https://api.data.enova.no/ems/offentlige-data/v2/Fil/{year}/{month}
-x-api-key: <your key>
-```
-
-Fetching every year+month gives every Norwegian energy label.
+Enova serves the certificates as **one bulk CSV per calendar month**, fetched in
+two hops, with the API version chosen by year:
 
 ```
-Enova v2 monthly files ──(Airflow DAG / CLI)──▶ Postgres ──▶ FastAPI
-  GET Fil/{year}/{month}    enova/ingest.py      energy_labels   api/main.py
-  x-api-key                 enova/client.py         table
+GET https://api.data.enova.no/ems/offentlige-data/v{1|2}/Fil/{year}/{month}
+    x-api-key: <key>
+  -> { "fromDate", "toDate", "bankFileUrl": <signed Azure blob URL> }
+GET <bankFileUrl>                          # no key; short-lived signed URL
+  -> the monthly CSV of energy certificates
+```
+
+- **v2** covers **2026+** (energikarakter only; the coloured oppvarmingskarakter
+  was removed 2026-01-01, and BRA / weighted-energy / attest-PDF columns added).
+- **v1** covers **pre-2026** (older layout: keeps oppvarmingskarakter + fossil-
+  andel + energivurdering). Data goes back to **2009**.
+
+Iterating every month from 2009 to now, across both versions, yields **every
+certificate exactly once** (each attest appears in the file for the month it was
+issued). Verified live end-to-end: 2015-06 → 7 812 rows (v1), 2026-01 → 9 095
+rows (v2).
+
+```
+Enova v1/v2 monthly CSVs ─(Airflow DAG / CLI)→ Postgres ─→ FastAPI
+  GET Fil/{year}/{month}     enova/ingest.py    energy_labels  api/main.py
+  → signed URL → CSV         enova/client.py       table
 ```
 
 ## Layout
 
 | Path | What |
 |------|------|
-| `enova/client.py` | Downloads + parses the monthly `Fil/{year}/{month}` files |
-| `enova/extract.py` | Tolerant field extraction (locates fields by name at any depth) |
-| `enova/db.py` | `energy_labels` table + dialect-portable upsert |
+| `enova/client.py` | Two-hop fetch (envelope → signed CSV); picks v1/v2 by year |
+| `enova/extract.py` | Maps a CSV row (v1 or v2 columns) to a stored record |
+| `enova/db.py` | `energy_labels` table (v1∪v2 columns) + portable upsert |
 | `enova/ingest.py` | Orchestration (shared by DAG + CLI), one file per (year, month) |
 | `dags/enova_energy_labels_dag.py` | Airflow DAG — one mapped task per month |
 | `api/main.py` | FastAPI: list/filter, by-attestnummer, grade stats |
 | `sql/001_schema.sql` | Reference DDL (also auto-created by the ingest) |
+| `tests/fixtures/` | Real v1 + v2 CSV samples (public NLOD data) |
 
 ## Configuration
 
@@ -39,8 +51,7 @@ All via `ENOVA_*` env vars (see `.env.example`). At minimum:
 
 - `ENOVA_API_KEY` — your Enova API key (sent as the `x-api-key` header)
 - `ENOVA_DATABASE_URL` — e.g. `postgresql+psycopg://enova:enova@localhost:5432/enova`
-- `ENOVA_START_YEAR` / `ENOVA_START_MONTH` — start of the backfill window
-  (end defaults to the current month)
+- `ENOVA_START_YEAR` / `ENOVA_START_MONTH` — backfill window start (default 2009-01)
 
 ## Run locally
 
@@ -51,7 +62,7 @@ docker compose up -d db                 # a local Postgres
 
 export ENOVA_API_KEY=...                 # your Enova key
 export ENOVA_DATABASE_URL=postgresql+psycopg://enova:enova@localhost:5432/enova
-python -m enova.ingest                   # backfill all months start..now
+python -m enova.ingest                   # full backfill 2009..now (v1 + v2)
 
 uvicorn api.main:app --reload            # http://localhost:8000/docs
 ```
@@ -60,24 +71,16 @@ Run the DAG by pointing an Airflow deployment's `dags/` at this folder and
 installing this package on the workers (`pip install -e .`), with the `ENOVA_*`
 env set. See `requirements-airflow.txt` for pinning guidance.
 
-## ⚠️ File record schema is assumed, not verified
+## What "all energy labels" covers
 
-The **access model is confirmed** — v2 `GET Fil/{year}/{month}` with an
-`x-api-key` header. What could **not** be verified against a live response is the
-exact **field layout inside each file** (the record objects). Two safeguards:
-
-1. **Extraction is by field name at any depth** (`enova/extract.py`) and keeps
-   the full raw record in the `raw` JSONB column — so the mapping survives the
-   real shape and can be corrected against live output.
-2. **File parsing is format-tolerant** (`enova/client.py`): a top-level JSON
-   array, an object wrapping the array, or NDJSON are all handled; an explicit
-   `ENOVA_RESULTS_PATH` can point at a nested array.
-
-After a first live run, sanity-check a stored `raw` value and tighten the field
-extractors in `extract.py` if any names differ.
-
-> **Secrets:** the API key is read from `ENOVA_API_KEY` and never committed. Keep
-> it in your secret store / Airflow connection, not in the repo.
+- **Every issued certificate** Enova publishes in the public bank files, 2009 →
+  now. This is per-**attest** (certificate), not per-building: a building
+  re-labelled over the years has one row per certificate. For "current label per
+  building", derive the latest `utstedelsesdato` per matrikkel
+  (`kommunenummer, gnr, bnr, snr, fnr, bygningsnummer`).
+- Only **labelled** buildings appear — there is no row for a building that was
+  never energy-labelled.
+- Licensed under **NLOD** (Norwegian Licence for Open Government Data).
 
 ## Tests
 
@@ -85,13 +88,6 @@ extractors in `extract.py` if any names differ.
 pip install pytest && python -m pytest
 ```
 
-Covers file parsing (array / envelope / NDJSON), the monthly client (mocked
-HTTP, incl. 404 + auth errors), idempotent upsert, and the API endpoints
-(against SQLite) — no network or Postgres required.
-
-## Note on energikarakter vs oppvarmingskarakter
-
-Every certificate carries an `energikarakter` (A–G). The coloured
-`oppvarmingskarakter` scale was **removed by Enova on 2026-01-01**, so older
-attester may still carry it while newer ones do not — it's stored when present.
-This is reference data (no ticker/symbol).
+Covers CSV parsing (v1 + v2, quoted commas, BOM), the two-hop client (version by
+year, 404 / future-400 / auth paths), idempotent upsert, and the API — all
+against real-data fixtures, no network or Postgres required.

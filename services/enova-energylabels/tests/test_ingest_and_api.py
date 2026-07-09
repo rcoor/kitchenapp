@@ -1,20 +1,30 @@
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 
+from enova.client import parse_csv
 from enova.db import init_db, upsert_labels
 from enova.extract import extract_label
 from enova.ingest import ingest_month
 
+FIXTURE = Path(__file__).parent / "fixtures" / "sample_bankfile.csv"
+
 
 class FakeClient:
-    """Stands in for EnovaClient — yields raw attester without any HTTP."""
+    """Stands in for EnovaClient — yields parsed CSV rows without any HTTP."""
 
     def __init__(self, rows_by_month):
         self._rows = rows_by_month
 
     def iter_month(self, year, month):
         yield from self._rows.get((year, month), [])
+
+
+@pytest.fixture
+def rows():
+    return parse_csv(FIXTURE.read_text(encoding="utf-8"))
 
 
 @pytest.fixture
@@ -33,67 +43,39 @@ def api(engine):
     app.dependency_overrides.clear()
 
 
-def _attest(n, karakter, kommune="0301"):
-    return {
-        "energiattest": {"attestnummer": f"A{n}", "energikarakter": karakter,
-                         "utstedelsesdato": f"2019-01-{n:02d}T00:00:00"},
-        "adresse": {"kommunenummer": kommune, "poststed": "OSLO"},
-        "energi": {"beregnetLevertEnergiTotaltkWhm2": 100 + n},
-    }
+def test_ingest_month_writes_real_rows(engine, rows):
+    client = FakeClient({(2026, 1): rows})
+    result = ingest_month(client, engine, 2026, 1)
+    assert (result.year, result.month, result.fetched, result.written) == (2026, 1, 3, 3)
 
 
-def test_ingest_month_writes_rows(engine):
-    client = FakeClient({(2019, 1): [_attest(1, "A"), _attest(2, "C")]})
-    result = ingest_month(client, engine, 2019, 1)
-    assert (result.year, result.month) == (2019, 1)
-    assert result.fetched == 2
-    assert result.written == 2
-
-
-def test_ingest_is_idempotent(engine):
-    client = FakeClient({(2019, 1): [_attest(1, "A"), _attest(1, "A")]})  # duplicate key
-    result = ingest_month(client, engine, 2019, 1)
-    assert result.written == 1  # de-duped on dedupe_key
-
-    # Re-running upserts (updates) rather than duplicating.
-    upsert_labels(engine, [extract_label(_attest(1, "B"))])
-    from sqlalchemy import select
-    from enova.db import energy_labels
-
-    with engine.connect() as conn:
-        rows = conn.execute(select(energy_labels.c.energikarakter)).fetchall()
-    assert [r[0] for r in rows] == ["B"]  # single row, updated grade
+def test_ingest_is_idempotent(engine, rows):
+    client = FakeClient({(2026, 1): rows + rows})  # duplicated rows
+    assert ingest_month(client, engine, 2026, 1).written == 3  # de-duped on Attestnummer
 
 
 def test_api_health(api):
     assert api.get("/health").json() == {"status": "ok"}
 
 
-def test_api_list_filter_and_get(api, engine):
-    upsert_labels(engine, [
-        extract_label(_attest(1, "A")),
-        extract_label(_attest(2, "C")),
-        extract_label(_attest(3, "A", kommune="1103")),
-    ])
+def test_api_list_filter_and_get(api, engine, rows):
+    upsert_labels(engine, [extract_label(r) for r in rows])
 
-    body = api.get("/energy-labels", params={"energikarakter": "a"}).json()
-    assert body["total"] == 2
-    assert {item["energikarakter"] for item in body["items"]} == {"A"}
-
-    body = api.get("/energy-labels", params={"kommunenummer": "1103"}).json()
+    body = api.get("/energy-labels", params={"kommunenummer": "5001"}).json()
     assert body["total"] == 1
-    assert body["items"][0]["attestnummer"] == "A3"
+    assert body["items"][0]["poststed"] == "TRONDHEIM"
+    assert body["items"][0]["energikarakter"] == "G"
 
-    one = api.get("/energy-labels/A2").json()
-    assert one["energikarakter"] == "C"
+    body = api.get("/energy-labels", params={"energikarakter": "c"}).json()
+    assert body["total"] == 1
+    assert body["items"][0]["kommunenummer"] == "3303"
+
+    one = api.get("/energy-labels/2c51263d-bc78-43cb-8ae5-cc3bb859232d").json()
+    assert one["gateadresse"] == "Håvet 3"
     assert api.get("/energy-labels/nope").status_code == 404
 
 
-def test_api_stats(api, engine):
-    upsert_labels(engine, [
-        extract_label(_attest(1, "A")),
-        extract_label(_attest(2, "A")),
-        extract_label(_attest(3, "C")),
-    ])
+def test_api_stats(api, engine, rows):
+    upsert_labels(engine, [extract_label(r) for r in rows])
     counts = {c["energikarakter"]: c["count"] for c in api.get("/stats/energikarakter").json()["counts"]}
-    assert counts == {"A": 2, "C": 1}
+    assert counts == {"C": 1, "D": 1, "G": 1}

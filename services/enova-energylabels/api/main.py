@@ -44,11 +44,12 @@ def health() -> dict[str, str]:
 @app.get("/energy-labels")
 def list_energy_labels(
     engine: Engine = Depends(get_engine),
-    kommunenummer: str | None = Query(default=None, description="Filter by kommune number, e.g. 0301"),
+    kommunenummer: str | None = Query(default=None, description="Filter by kommune number (Knr), e.g. 0301"),
     energikarakter: str | None = Query(default=None, description="Filter by grade A–G"),
+    bygningskategori: str | None = None,
     poststed: str | None = None,
-    byggeaar_min: int | None = None,
-    byggeaar_max: int | None = None,
+    byggear_min: int | None = None,
+    byggear_max: int | None = None,
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
 ) -> dict[str, Any]:
@@ -57,12 +58,14 @@ def list_energy_labels(
         conditions.append(energy_labels.c.kommunenummer == kommunenummer)
     if energikarakter:
         conditions.append(energy_labels.c.energikarakter == energikarakter.upper())
+    if bygningskategori:
+        conditions.append(energy_labels.c.bygningskategori == bygningskategori)
     if poststed:
         conditions.append(energy_labels.c.poststed == poststed)
-    if byggeaar_min is not None:
-        conditions.append(energy_labels.c.byggeaar >= byggeaar_min)
-    if byggeaar_max is not None:
-        conditions.append(energy_labels.c.byggeaar <= byggeaar_max)
+    if byggear_min is not None:
+        conditions.append(energy_labels.c.byggear >= byggear_min)
+    if byggear_max is not None:
+        conditions.append(energy_labels.c.byggear <= byggear_max)
 
     with engine.connect() as conn:
         total = conn.execute(

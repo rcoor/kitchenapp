@@ -16,17 +16,21 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="ENOVA_", env_file=".env", extra="ignore")
 
     # --- Enova public-data API (energimerkeordningen / energiattest) ---------
-    # v2 "offentlige data" serves the full attest set as one bulk file per
-    # calendar month:  GET {base}/{endpoint}/{year}/{month}  with an x-api-key
-    # header. Fetching every year+month gives all Norwegian energy labels.
-    base_url: str = "https://api.data.enova.no/ems/offentlige-data/v2"
+    # "Offentlige data" serves the full attest set as one bulk file per calendar
+    # month:  GET {base}/v{N}/{endpoint}/{year}/{month}  with an x-api-key header,
+    # returning a signed URL to a monthly CSV. v2 covers 2026+; earlier years are
+    # on v1 (an older CSV layout). The client picks the version by year, so pulling
+    # every year+month across both versions gives ALL Norwegian energy labels.
+    base_url: str = "https://api.data.enova.no/ems/offentlige-data"
     endpoint: str = "Fil"
     api_key: str = Field(default="", description="Enova API key (sent as the x-api-key header)")
     api_key_header: str = "x-api-key"
+    v2_start_year: int = 2026  # first year served by v2; earlier years use v1
 
-    # Which months to pull: [start .. end] inclusive. end defaults to the
-    # current month, so a run always reaches the latest published file.
-    start_year: int = 2010
+    # Which months to pull: [start .. end] inclusive. Default start covers the
+    # full history (the scheme dates from ~2010); end defaults to the current
+    # month, so a run always reaches the latest published file.
+    start_year: int = 2009  # earliest year with published attester
     start_month: int = 1
     end_year: int | None = None
     end_month: int | None = None
@@ -34,8 +38,6 @@ class Settings(BaseSettings):
     request_timeout: float = 120.0
     # 0 = unlimited; otherwise an upper safety bound on records per run.
     max_records: int = 0
-    # Optional dotted path to the record array inside a file, if it is wrapped.
-    results_path: str = ""
 
     # --- Storage -------------------------------------------------------------
     database_url: str = "postgresql+psycopg://enova:enova@localhost:5432/enova"

@@ -1,55 +1,70 @@
+from pathlib import Path
+
 import httpx
 import pytest
 
-from enova.client import EnovaApiError, EnovaClient, parse_file_body
+from enova.client import EnovaApiError, EnovaClient, parse_csv
+
+FIXTURES = Path(__file__).parent / "fixtures"
+BLOB = "https://stemsenergyplanprodnoea.blob.core.windows.net/bankfiles/x.csv?sig=abc"
 
 
-def _make_client(handler) -> EnovaClient:
-    transport = httpx.MockTransport(handler)
+def _client(handler) -> EnovaClient:
     return EnovaClient(
-        base_url="https://api.data.enova.no/ems/offentlige-data/v2",
+        base_url="https://api.data.enova.no/ems/offentlige-data",
         endpoint="Fil",
         api_key="KEY",
-        client=httpx.Client(transport=transport),
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
     )
 
 
-def test_get_month_sends_key_and_parses_array():
+def test_two_hop_envelope_then_csv_v2():
+    csv_text = (FIXTURES / "sample_bankfile.csv").read_text(encoding="utf-8")
+
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.method == "GET"
-        assert request.url.path == "/ems/offentlige-data/v2/Fil/2026/1"
-        assert request.headers["x-api-key"] == "KEY"
-        return httpx.Response(200, json=[{"attestnummer": "A1"}, {"attestnummer": "A2"}])
+        if request.url.host == "api.data.enova.no":
+            assert request.headers["x-api-key"] == "KEY"
+            assert request.url.path.endswith("/v2/Fil/2026/1")  # 2026 -> v2
+            return httpx.Response(200, json={"bankFileUrl": BLOB})
+        assert request.url.host.endswith("blob.core.windows.net")
+        return httpx.Response(200, text=csv_text)
 
-    client = _make_client(handler)
-    rows = list(client.iter_month(2026, 1))
-    assert [r["attestnummer"] for r in rows] == ["A1", "A2"]
+    rows = list(_client(handler).iter_month(2026, 1))
+    assert len(rows) == 3 and rows[0]["Energikarakter"] == "C"
 
 
-def test_404_month_yields_nothing():
-    client = _make_client(lambda req: httpx.Response(404, text="not found"))
-    assert list(client.iter_month(2099, 1)) == []
+def test_pre_2026_uses_v1():
+    csv_text = (FIXTURES / "sample_bankfile_v1.csv").read_text(encoding="utf-8")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "api.data.enova.no":
+            assert request.url.path.endswith("/v1/Fil/2015/6")  # 2015 -> v1
+            return httpx.Response(200, json={"bankFileUrl": BLOB})
+        return httpx.Response(200, text=csv_text)
+
+    rows = list(_client(handler).iter_month(2015, 6))
+    assert len(rows) == 2
+    assert rows[0]["Oppvarmingskarakter"] == "Lightgreen"  # v1 has the colour scale
+
+
+def test_pre_2026_month_404_yields_nothing():
+    assert list(_client(lambda req: httpx.Response(404, json={"detail": "..."})).iter_month(2015, 6)) == []
+
+
+def test_future_month_400_yields_nothing():
+    client = _client(lambda req: httpx.Response(400, text="Cannot query date in the future."))
+    assert list(client.iter_month(2030, 1)) == []
 
 
 def test_auth_error_is_fatal():
-    client = _make_client(lambda req: httpx.Response(401, text="unauthorized"))
     with pytest.raises(EnovaApiError):
-        list(client.iter_month(2026, 1))
+        list(_client(lambda req: httpx.Response(401, text="unauthorized")).iter_month(2026, 1))
 
 
-def test_envelope_wrapped_file_is_unwrapped():
-    client = _make_client(
-        lambda req: httpx.Response(200, json={"Energiattestene": [{"attestnummer": "X1"}]})
-    )
-    assert [r["attestnummer"] for r in client.iter_month(2026, 1)] == ["X1"]
+def test_missing_bank_file_url_yields_nothing():
+    assert list(_client(lambda req: httpx.Response(200, json={"fromDate": "x"})).iter_month(2026, 1)) == []
 
 
-def test_parse_file_body_handles_ndjson():
-    text = '{"attestnummer": "A1"}\n{"attestnummer": "A2"}\n\n'
-    rows = parse_file_body(text)
-    assert [r["attestnummer"] for r in rows] == ["A1", "A2"]
-
-
-def test_parse_file_body_empty():
-    assert parse_file_body("") == []
-    assert parse_file_body("   ") == []
+def test_parse_csv_handles_quoted_commas():
+    rows = parse_csv((FIXTURES / "sample_bankfile_v1.csv").read_text(encoding="utf-8"))
+    assert rows[0]["GateAdresse"] == "SLYNGVEIEN,4,E"  # embedded commas in quotes

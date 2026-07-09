@@ -2,7 +2,7 @@
 
 Prod runs on Postgres (JSONB, ``ON CONFLICT`` upsert). The same schema also
 works on SQLite so the ingest and API can be exercised in tests without a
-running Postgres.
+running Postgres. Columns mirror the real Enova v2 bank-file CSV.
 """
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from sqlalchemy import (
+    Boolean,
     Column,
-    Date,
     DateTime,
     Integer,
     MetaData,
@@ -34,21 +34,36 @@ _JSON = JSON().with_variant(JSONB(), "postgresql")
 energy_labels = Table(
     "energy_labels",
     metadata,
-    Column("dedupe_key", String, primary_key=True),
+    Column("dedupe_key", String, primary_key=True),  # Attestnummer (GUID)
     Column("attestnummer", String, index=True),
-    Column("energikarakter", String, index=True),
-    Column("oppvarmingskarakter", String),
-    Column("bygningskategori", String),
-    Column("byggeaar", Integer),
-    Column("bruksareal", Numeric),
-    Column("levert_energi_kwh_m2", Numeric),
-    Column("kommunenummer", String, index=True),
+    Column("kommunenummer", String, index=True),      # Knr
+    Column("gnr", Integer),
+    Column("bnr", Integer),
+    Column("snr", Integer),
+    Column("fnr", Integer),
+    Column("andelsnummer", String),
+    Column("bygningsnummer", String),
     Column("gateadresse", String),
-    Column("postnummer", String),
+    Column("postnummer", String, index=True),
     Column("poststed", String),
-    Column("gardsnummer", String),
-    Column("bruksnummer", String),
-    Column("utstedelsesdato", Date),
+    Column("bruksenhetsnummer", String),
+    Column("organisasjonsnummer", String),
+    Column("bygningskategori", String, index=True),
+    Column("byggear", Integer),
+    Column("oppgitt_bra", Numeric),
+    Column("oppvarmet_bra", Numeric),
+    Column("energikarakter", String, index=True),     # A–G
+    Column("oppvarmingskarakter", String),            # removed by Enova 2026-01-01
+    Column("utstedelsesdato", DateTime),
+    Column("type_registrering", String),
+    Column("levert_energi_kwh_m2", Numeric),
+    Column("materialvalg", String),
+    Column("vektet_levert_kwh", Numeric),
+    Column("vektet_levert_kwh_m2", Numeric),
+    Column("attest_uri", String),
+    Column("fossilandel", Numeric),               # v1 only
+    Column("har_energivurdering", Boolean),       # v1 only
+    Column("energivurdering_dato", DateTime),     # v1 only
     Column("raw", _JSON),
     Column("ingested_at", DateTime(timezone=True)),
 )
@@ -72,7 +87,7 @@ def upsert_labels(engine: Engine, rows: Iterable[dict[str, Any]]) -> int:
     """
     now = datetime.now(timezone.utc)
     # De-duplicate by key (last wins): a single ON CONFLICT statement cannot
-    # touch the same row twice, and pages may occasionally overlap.
+    # touch the same row twice, and files may occasionally overlap.
     by_key: dict[str, dict[str, Any]] = {}
     for r in rows:
         key = r.get("dedupe_key")
@@ -83,8 +98,8 @@ def upsert_labels(engine: Engine, rows: Iterable[dict[str, Any]]) -> int:
         return 0
 
     insert = pg_insert if engine.dialect.name == "postgresql" else sqlite_insert
-    # Chunk so a large kommune stays under the backend bind-parameter ceiling
-    # (Postgres caps at 65535 params; ~17 cols => a few thousand rows per stmt).
+    # Chunk so a large month stays under the backend bind-parameter ceiling
+    # (Postgres caps at 65535 params; ~29 cols => ~2000 rows per statement).
     chunk_size = 500
     written = 0
     with engine.begin() as conn:

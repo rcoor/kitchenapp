@@ -45,8 +45,8 @@ def build_client(settings: Settings) -> EnovaClient:
         endpoint=settings.endpoint,
         api_key=settings.api_key,
         api_key_header=settings.api_key_header,
+        v2_start_year=settings.v2_start_year,
         timeout=settings.request_timeout,
-        results_path=settings.results_path,
     )
 
 

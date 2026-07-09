@@ -1,116 +1,114 @@
-"""Field extraction for Enova energy certificates ("energiattest").
+"""Map an Enova bank-file CSV row to a stored energy-label record.
 
-Enova's public-data payload nests fields (attest / bygg / adresse / energi …)
-and the exact shape is not contractually pinned here, so — like a tolerant
-scraper — we locate fields *by name at any depth* rather than by a fixed path,
-and keep the full raw record so nothing is lost and the mapping can be verified
-against live output.
+Column names are the real v2 bank-file headers (verified against a live file):
+
+    Knr, Gnr, Bnr, Snr, Fnr, Andelsnummer, Bygningsnummer, GateAdresse,
+    Postnummer, Poststed, BruksEnhetsNummer, Organisasjonsnummer,
+    Bygningskategori, Byggear, OppgittBra, OppvarmetBra, Energikarakter,
+    Utstedelsesdato, TypeRegistrering, Attestnummer,
+    BeregnetLevertEnergiTotaltkWhm2, Materialvalg,
+    BeregnetVektetLevertEnergiReferanseklimaKWh,
+    BeregnetVektetLevertEnergiReferanseklimaKWhm2, AttestUri
+
+The coloured Oppvarmingskarakter was removed by Enova on 2026-01-01, so v2
+(2026+) files do not carry it; it is still captured if a file provides it.
 """
 from __future__ import annotations
 
-import re
-from datetime import date
+from datetime import datetime
 from typing import Any
 
-# Field-name matchers (case-insensitive), tried against every key at any depth.
-_RE_KARAKTER = re.compile(r"^energikarakter$", re.I)
-_RE_HEAT = re.compile(r"oppvarmingskarakter", re.I)
-_RE_DATE = re.compile(r"(utstedelses.*dato|attest.*dato|^dato$|gyldig.*fra)", re.I)
-_RE_ENERGY = re.compile(r"(beregnet.*levert|levert.*energi|energitotalt|kwhm2|kwhperm2|totalt.*kwh)", re.I)
-_RE_CATEGORY = re.compile(r"(bygningskategori|bygningstype|byggkategori)", re.I)
-_RE_YEAR = re.compile(r"(bygge.?[aå]+r|oppfoerings)", re.I)  # Byggeår / Byggeaar / Byggear
-_RE_AREA = re.compile(r"(bruksareal|^bra$)", re.I)
-_RE_ATTEST = re.compile(r"(attestnummer|attestid|energiattestid|attestguid)", re.I)
-_RE_ADDR = re.compile(r"(gateadresse|gatenavn)$", re.I)
-_RE_POST = re.compile(r"^postnummer$", re.I)
-_RE_PLACE = re.compile(r"^poststed$", re.I)
-_RE_KNR = re.compile(r"^(kommunenummer|kommunenr)$", re.I)
-_RE_KNR_ABBR = re.compile(r"^knr$", re.I)  # dataset uses the abbreviated "Knr"
-_RE_GNR = re.compile(r"(gardsnummer|gaardsnummer|gnr)$", re.I)
-_RE_BNR = re.compile(r"(bruksnummer|bnr)$", re.I)
+
+def _ci(row: dict[str, Any]) -> dict[str, Any]:
+    """Case-insensitive view of a CSV row keyed by lower-cased header."""
+    return {str(k).strip().lower(): v for k, v in row.items()}
 
 
-def deep_find(obj: Any, pattern: re.Pattern[str], depth: int = 0) -> Any:
-    """Return the first primitive value whose key matches ``pattern`` (any depth)."""
-    if obj is None or depth > 6:
+def _s(v: Any) -> str | None:
+    if v is None:
         return None
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            if pattern.search(str(k)) and not isinstance(v, (dict, list)):
-                return v
-        for v in obj.values():
-            found = deep_find(v, pattern, depth + 1)
-            if found is not None:
-                return found
-    elif isinstance(obj, list):
-        for v in obj:
-            found = deep_find(v, pattern, depth + 1)
-            if found is not None:
-                return found
-    return None
+    s = str(v).strip()
+    return s or None
 
 
-def _to_float(value: Any) -> float | None:
-    if value is None:
+def _f(v: Any) -> float | None:
+    s = _s(v)
+    if s is None:
         return None
-    cleaned = re.sub(r"[^0-9.,-]", "", str(value)).replace(",", ".")
     try:
-        return float(cleaned) if cleaned not in ("", "-", ".") else None
+        return float(s.replace(",", "."))
     except ValueError:
         return None
 
 
-def _to_int(value: Any) -> int | None:
-    f = _to_float(value)
+def _i(v: Any) -> int | None:
+    f = _f(v)
     return int(f) if f is not None else None
 
 
-def _to_date(value: Any) -> date | None:
-    if value is None:
+def _b(v: Any) -> bool | None:
+    s = _s(v)
+    if s is None:
         return None
-    text = str(value).strip()
-    if not text:
+    return s.lower() in ("true", "1", "ja", "yes")
+
+
+def _dt(v: Any) -> datetime | None:
+    s = _s(v)
+    if s is None:
         return None
-    # Enova dates look like "2018-05-01T00:00:00"; take the date part.
+    # e.g. "2026-01-31T23:22:23.0000000" — trim to seconds for fromisoformat.
     try:
-        return date.fromisoformat(text[:10])
+        return datetime.fromisoformat(s[:19])
     except ValueError:
-        return None
+        try:
+            return datetime.fromisoformat(s[:10])
+        except ValueError:
+            return None
 
 
-def extract_label(raw: dict[str, Any], kommunenummer: str | None = None) -> dict[str, Any]:
-    """Normalize one raw Enova attest into a flat, storable energy-label row."""
-    karakter = deep_find(raw, _RE_KARAKTER)
-    attest = deep_find(raw, _RE_ATTEST)
-    knr = kommunenummer or deep_find(raw, _RE_KNR) or deep_find(raw, _RE_KNR_ABBR)
-    utstedelsesdato = _to_date(deep_find(raw, _RE_DATE))
-    gnr = deep_find(raw, _RE_GNR)
-    bnr = deep_find(raw, _RE_BNR)
+def extract_label(row: dict[str, Any]) -> dict[str, Any]:
+    """Normalize one raw CSV row into a storable energy-label dict."""
+    r = _ci(row)
+    attest = _s(r.get("attestnummer"))
+    knr = _s(r.get("knr")) or _s(r.get("kommunenummer"))
 
-    dedupe_key = str(attest).strip() if attest not in (None, "") else ""
-    if not dedupe_key:
-        parts = [str(p) for p in (knr, gnr, bnr, utstedelsesdato, karakter) if p not in (None, "")]
-        dedupe_key = "|".join(parts)
+    dedupe_key = attest or "|".join(
+        p for p in (knr, _s(r.get("gnr")), _s(r.get("bnr")), _s(r.get("snr")),
+                    _s(r.get("fnr")), _s(r.get("bygningsnummer"))) if p
+    ) or None
 
     return {
-        "dedupe_key": dedupe_key or None,
-        "attestnummer": str(attest) if attest not in (None, "") else None,
-        "energikarakter": str(karakter).strip().upper() if karakter not in (None, "") else None,
-        "oppvarmingskarakter": _str_or_none(deep_find(raw, _RE_HEAT)),
-        "bygningskategori": _str_or_none(deep_find(raw, _RE_CATEGORY)),
-        "byggeaar": _to_int(deep_find(raw, _RE_YEAR)),
-        "bruksareal": _to_float(deep_find(raw, _RE_AREA)),
-        "levert_energi_kwh_m2": _to_float(deep_find(raw, _RE_ENERGY)),
-        "kommunenummer": _str_or_none(knr),
-        "gateadresse": _str_or_none(deep_find(raw, _RE_ADDR)),
-        "postnummer": _str_or_none(deep_find(raw, _RE_POST)),
-        "poststed": _str_or_none(deep_find(raw, _RE_PLACE)),
-        "gardsnummer": _str_or_none(gnr),
-        "bruksnummer": _str_or_none(bnr),
-        "utstedelsesdato": utstedelsesdato,
-        "raw": raw,
+        "dedupe_key": dedupe_key,
+        "attestnummer": attest,
+        "kommunenummer": knr,
+        "gnr": _i(r.get("gnr")),
+        "bnr": _i(r.get("bnr")),
+        "snr": _i(r.get("snr")),
+        "fnr": _i(r.get("fnr")),
+        "andelsnummer": _s(r.get("andelsnummer")),
+        "bygningsnummer": _s(r.get("bygningsnummer")),
+        "gateadresse": _s(r.get("gateadresse")),
+        "postnummer": _s(r.get("postnummer")),
+        "poststed": _s(r.get("poststed")),
+        "bruksenhetsnummer": _s(r.get("bruksenhetsnummer")),
+        "organisasjonsnummer": _s(r.get("organisasjonsnummer")),
+        "bygningskategori": _s(r.get("bygningskategori")),
+        "byggear": _i(r.get("byggear")),
+        "oppgitt_bra": _f(r.get("oppgittbra")),
+        "oppvarmet_bra": _f(r.get("oppvarmetbra")),
+        "energikarakter": (_s(r.get("energikarakter")) or "").upper() or None,
+        "oppvarmingskarakter": _s(r.get("oppvarmingskarakter")),
+        "utstedelsesdato": _dt(r.get("utstedelsesdato")),
+        "type_registrering": _s(r.get("typeregistrering")),
+        "levert_energi_kwh_m2": _f(r.get("beregnetlevertenergitotaltkwhm2")),
+        "materialvalg": _s(r.get("materialvalg")),
+        "vektet_levert_kwh": _f(r.get("beregnetvektetlevertenergireferanseklimakwh")),
+        "vektet_levert_kwh_m2": _f(r.get("beregnetvektetlevertenergireferanseklimakwhm2")),
+        "attest_uri": _s(r.get("attesturi")),
+        # v1-only fields (older format); None on v2 files.
+        "fossilandel": _f(r.get("beregnetfossilandel")),
+        "har_energivurdering": _b(r.get("harenergivurdering")),
+        "energivurdering_dato": _dt(r.get("energivurderingdato")),
+        "raw": row,
     }
-
-
-def _str_or_none(value: Any) -> str | None:
-    return str(value) if value not in (None, "") else None
