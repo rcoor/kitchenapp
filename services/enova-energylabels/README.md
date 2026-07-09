@@ -23,8 +23,18 @@ GET <bankFileUrl>                          # no key; short-lived signed URL
 
 Iterating every month from 2009 to now, across both versions, yields **every
 certificate exactly once** (each attest appears in the file for the month it was
-issued). Verified live end-to-end: 2015-06 → 7 812 rows (v1), 2026-01 → 9 095
-rows (v2).
+issued).
+
+**Verified live at full scale** (a whole-history sourcing run, 2009 → 2026):
+
+| | |
+|---|---|
+| Certificates (attester) | **1 822 500** |
+| Distinct building units | **1 337 787** |
+| Grades | A 64 256 · B 209 212 · C 225 118 · D 321 766 · E 278 349 · F 324 339 · G 399 460 |
+
+(~18 whole-year requests via `iter_year`; the grade counts sum exactly to the
+total.)
 
 ```
 Enova v1/v2 monthly CSVs ─(Airflow DAG / CLI)→ Postgres ─→ FastAPI
