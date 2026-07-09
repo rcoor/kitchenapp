@@ -51,3 +51,34 @@ def test_missing_fields_are_none():
     assert label["energikarakter"] == "A"
     assert label["byggeaar"] is None
     assert label["utstedelsesdato"] is None
+
+
+# Representative record modelled on Enova's documented public energiattest
+# dataset field names (flat PascalCase, incl. the "Byggeår" å and abbreviated
+# "Knr"). Locks the extractor against those real-world spellings.
+ENOVA_DATASET_RECORD = {
+    "Attestnummer": "A2013-427111",
+    "Knr": "0301",
+    "Gnr": 208, "Bnr": 253,
+    "GateAdresse": "Karl Johans gate 31",
+    "Postnummer": "0159",
+    "Poststed": "OSLO",
+    "Bygningskategori": "Boligblokk",
+    "Byggeår": 1899,
+    "Energikarakter": "C",
+    "Oppvarmingskarakter": "Gul",
+    "Utstedelsesdato": "2013-08-20T00:00:00",
+    "BeregnetLevertEnergiTotaltkWhm2": 185.0,
+}
+
+
+def test_extract_matches_enova_dataset_field_names():
+    label = extract_label(ENOVA_DATASET_RECORD)
+    assert label["dedupe_key"] == "A2013-427111"
+    assert label["energikarakter"] == "C"
+    assert label["byggeaar"] == 1899           # "Byggeår" (å) must match
+    assert label["kommunenummer"] == "0301"    # abbreviated "Knr" must match
+    assert label["gardsnummer"] == "208"
+    assert label["bruksnummer"] == "253"
+    assert label["levert_energi_kwh_m2"] == 185.0
+    assert label["utstedelsesdato"] == date(2013, 8, 20)

@@ -18,13 +18,14 @@ _RE_HEAT = re.compile(r"oppvarmingskarakter", re.I)
 _RE_DATE = re.compile(r"(utstedelses.*dato|attest.*dato|^dato$|gyldig.*fra)", re.I)
 _RE_ENERGY = re.compile(r"(beregnet.*levert|levert.*energi|energitotalt|kwhm2|kwhperm2|totalt.*kwh)", re.I)
 _RE_CATEGORY = re.compile(r"(bygningskategori|bygningstype|byggkategori)", re.I)
-_RE_YEAR = re.compile(r"(byggeaar|byggear|oppfoerings)", re.I)
+_RE_YEAR = re.compile(r"(bygge.?[aå]+r|oppfoerings)", re.I)  # Byggeår / Byggeaar / Byggear
 _RE_AREA = re.compile(r"(bruksareal|^bra$)", re.I)
 _RE_ATTEST = re.compile(r"(attestnummer|attestid|energiattestid|attestguid)", re.I)
 _RE_ADDR = re.compile(r"(gateadresse|gatenavn)$", re.I)
 _RE_POST = re.compile(r"^postnummer$", re.I)
 _RE_PLACE = re.compile(r"^poststed$", re.I)
-_RE_KNR = re.compile(r"^kommunenummer$", re.I)
+_RE_KNR = re.compile(r"^(kommunenummer|kommunenr)$", re.I)
+_RE_KNR_ABBR = re.compile(r"^knr$", re.I)  # dataset uses the abbreviated "Knr"
 _RE_GNR = re.compile(r"(gardsnummer|gaardsnummer|gnr)$", re.I)
 _RE_BNR = re.compile(r"(bruksnummer|bnr)$", re.I)
 
@@ -81,7 +82,7 @@ def extract_label(raw: dict[str, Any], kommunenummer: str | None = None) -> dict
     """Normalize one raw Enova attest into a flat, storable energy-label row."""
     karakter = deep_find(raw, _RE_KARAKTER)
     attest = deep_find(raw, _RE_ATTEST)
-    knr = kommunenummer or deep_find(raw, _RE_KNR)
+    knr = kommunenummer or deep_find(raw, _RE_KNR) or deep_find(raw, _RE_KNR_ABBR)
     utstedelsesdato = _to_date(deep_find(raw, _RE_DATE))
     gnr = deep_find(raw, _RE_GNR)
     bnr = deep_find(raw, _RE_BNR)
