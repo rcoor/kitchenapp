@@ -55,18 +55,19 @@ class EnovaClient:
     def _headers(self) -> dict[str, str]:
         return {"Accept": "application/json", "Cache-Control": "no-cache", self.api_key_header: self.api_key}
 
-    def _month_url(self, year: int, month: int) -> str:
+    def _period_url(self, year: int, month: int | None) -> str:
         version = 2 if year >= self.v2_start_year else 1
-        return f"{self.root}/v{version}/{self.endpoint}/{year}/{month}"
+        base = f"{self.root}/v{version}/{self.endpoint}/{year}"
+        return f"{base}/{month}" if month else base  # month omitted => whole-year file
 
-    def get_bank_file_url(self, year: int, month: int) -> str | None:
-        """Return the signed CSV URL for a month, or None if there is no file.
+    def get_bank_file_url(self, year: int, month: int | None = None) -> str | None:
+        """Return the signed CSV URL for a period, or None if there is no file.
 
-        404 => no file for that month. 400 "future" => skip. 401/403 => fatal
-        auth error. Other 4xx/5xx => raise. The API version (v1 for pre-2026,
-        v2 otherwise) is chosen by year.
+        ``month=None`` fetches the whole-year file (fewer requests for backfill).
+        404 => no file. 400 "future" => skip. 401/403 => fatal auth error. Other
+        4xx/5xx => raise. The API version (v1 pre-2026, v2 otherwise) is by year.
         """
-        url = self._month_url(year, month)
+        url = self._period_url(year, month)
         resp = self._client.get(url, headers=self._headers)
         if resp.status_code == 404:
             return None
@@ -78,15 +79,24 @@ class EnovaClient:
             raise EnovaApiError(f"Enova API {resp.status_code} for {url}: {resp.text[:200]}")
         return (resp.json() or {}).get("bankFileUrl") or None
 
-    def iter_month(self, year: int, month: int) -> Iterator[dict[str, Any]]:
-        """Yield raw CSV rows for one year+month (empty if no file)."""
+    def iter_period(self, year: int, month: int | None = None) -> Iterator[dict[str, Any]]:
+        """Yield raw CSV rows for a month (or the whole year if month is None)."""
         file_url = self.get_bank_file_url(year, month)
         if not file_url:
             return
         resp = self._client.get(file_url)
         if resp.status_code >= 400:
-            raise EnovaApiError(f"Enova bank file {resp.status_code} for {year}-{month:02d}")
+            label = f"{year}" if month is None else f"{year}-{month:02d}"
+            raise EnovaApiError(f"Enova bank file {resp.status_code} for {label}")
         yield from parse_csv(resp.text)
+
+    def iter_month(self, year: int, month: int) -> Iterator[dict[str, Any]]:
+        """Yield raw CSV rows for one year+month (empty if no file)."""
+        yield from self.iter_period(year, month)
+
+    def iter_year(self, year: int) -> Iterator[dict[str, Any]]:
+        """Yield raw CSV rows for a whole year (one request; used for backfill)."""
+        yield from self.iter_period(year, None)
 
     def close(self) -> None:
         self._client.close()

@@ -75,6 +75,22 @@ def test_api_list_filter_and_get(api, engine, rows):
     assert api.get("/energy-labels/nope").status_code == 404
 
 
+def test_api_buildings_collapses_to_current_label(api, engine, rows):
+    # v2 fixture: 3 distinct buildings. v1 fixture: 2 attester for the SAME unit.
+    v1 = parse_csv((Path(__file__).parent / "fixtures" / "sample_bankfile_v1.csv").read_text(encoding="utf-8"))
+    upsert_labels(engine, [extract_label(r) for r in rows] + [extract_label(r) for r in v1])
+
+    all_labels = api.get("/energy-labels", params={"limit": 1}).json()
+    buildings = api.get("/buildings").json()
+    assert all_labels["total"] == 5           # 3 v2 + 2 v1 certificates
+    assert buildings["total"] == 4            # the 2 v1 attester collapse to 1 unit
+
+    # The collapsed unit keeps the most recently issued attest (23:57 > 23:52).
+    drobak = [b for b in buildings["items"] if b["poststed"] == "DRØBAK"]
+    assert len(drobak) == 1
+    assert drobak[0]["attestnummer"] == "A2015-571245"
+
+
 def test_api_stats(api, engine, rows):
     upsert_labels(engine, [extract_label(r) for r in rows])
     counts = {c["energikarakter"]: c["count"] for c in api.get("/stats/energikarakter").json()["counts"]}

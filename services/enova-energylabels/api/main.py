@@ -87,6 +87,59 @@ def list_energy_labels(
     }
 
 
+# The columns that identify one physical dwelling/building unit. The "current"
+# label for a unit is its most recently issued attest.
+_BUILDING_KEY = [
+    energy_labels.c.kommunenummer,
+    energy_labels.c.gnr,
+    energy_labels.c.bnr,
+    energy_labels.c.snr,
+    energy_labels.c.fnr,
+    energy_labels.c.bygningsnummer,
+    energy_labels.c.bruksenhetsnummer,
+]
+
+
+@app.get("/buildings")
+def list_buildings(
+    engine: Engine = Depends(get_engine),
+    kommunenummer: str | None = Query(default=None, description="Filter by kommune number (Knr)"),
+    energikarakter: str | None = Query(default=None, description="Current grade A–G"),
+    poststed: str | None = None,
+    limit: int = Query(default=100, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    """Current energy label per building/dwelling unit (latest attest per matrikkel).
+
+    Collapses the per-certificate history to one row per unit, keeping the most
+    recently issued attest.
+    """
+    rn = func.row_number().over(
+        partition_by=_BUILDING_KEY,
+        order_by=[energy_labels.c.utstedelsesdato.desc().nullslast(), energy_labels.c.dedupe_key.desc()],
+    ).label("_rn")
+    latest = select(energy_labels, rn).subquery()
+
+    conditions = [latest.c._rn == 1]
+    if kommunenummer:
+        conditions.append(latest.c.kommunenummer == kommunenummer)
+    if energikarakter:
+        conditions.append(latest.c.energikarakter == energikarakter.upper())
+    if poststed:
+        conditions.append(latest.c.poststed == poststed)
+
+    with engine.connect() as conn:
+        total = conn.execute(select(func.count()).select_from(latest).where(*conditions)).scalar_one()
+        rows = conn.execute(
+            select(latest).where(*conditions)
+            .order_by(latest.c.utstedelsesdato.desc().nullslast())
+            .limit(limit).offset(offset)
+        ).fetchall()
+
+    items = [{k: v for k, v in r._mapping.items() if k != "_rn"} for r in rows]
+    return {"total": total, "limit": limit, "offset": offset, "items": items}
+
+
 @app.get("/energy-labels/{attestnummer}")
 def get_energy_label(attestnummer: str, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
     with engine.connect() as conn:
