@@ -63,23 +63,47 @@ All via `ENOVA_*` env vars (see `.env.example`). At minimum:
 - `ENOVA_DATABASE_URL` — e.g. `postgresql+psycopg://enova:enova@localhost:5432/enova`
 - `ENOVA_START_YEAR` / `ENOVA_START_MONTH` — backfill window start (default 2009-01)
 
-## Run locally
+## Quick start with Docker (Apple Silicon / M1 ready)
+
+Everything runs in containers — no local Python needed. All images are
+multi-arch, so they run natively on arm64 (M1/M2) with no emulation.
+
+```bash
+cp .env.example .env         # then set ENOVA_API_KEY=...
+docker compose up --build    # Postgres + one-shot backfill + API
+```
+
+- **API** → http://localhost:8000/docs
+- The `ingest` container back-fills every certificate then exits; the `api`
+  container creates the table on startup, so it serves immediately (and fills as
+  the backfill runs). Data persists in the `enova_pgdata` volume.
+- A full history backfill is ~1.8M rows / ~2 GB / ~20 min. For a quick trial set
+  `ENOVA_START_YEAR=2025` in `.env`.
+
+Handy targets (see `Makefile`): `make up`, `make ingest` (refresh), `make psql`,
+`make down`, `make clean` (wipe volume).
+
+### Optional: Airflow (scheduled ingestion)
+
+```bash
+docker compose --profile airflow up --build   # UI at http://localhost:8080 (admin/admin)
+```
+
+The Airflow image installs the ingest into an isolated venv and runs it via a
+BashOperator, so Airflow's SQLAlchemy 1.4 never clashes with this project's
+SQLAlchemy 2.0.
+
+## Run without Docker
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
-docker compose up -d db                 # a local Postgres
 
 export ENOVA_API_KEY=...                 # your Enova key
 export ENOVA_DATABASE_URL=postgresql+psycopg://enova:enova@localhost:5432/enova
 python -m enova.ingest                   # full backfill 2009..now (v1 + v2)
-
 uvicorn api.main:app --reload            # http://localhost:8000/docs
 ```
-
-Run the DAG by pointing an Airflow deployment's `dags/` at this folder and
-installing this package on the workers (`pip install -e .`), with the `ENOVA_*`
-env set. See `requirements-airflow.txt` for pinning guidance.
 
 ## What "all energy labels" covers
 

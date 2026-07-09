@@ -5,21 +5,15 @@ engine is a dependency so tests can point it at a throwaway database.
 """
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.engine import Engine
 
-from enova.db import create_engine_from_url, energy_labels
+from enova.db import create_engine_from_url, energy_labels, init_db
 from enova.settings import get_settings
-
-app = FastAPI(
-    title="Enova Norwegian Energy Labels",
-    version="1.0.0",
-    description="Query Norwegian building energy certificates (energikarakter A–G) "
-    "sourced from Enova's public-data API.",
-)
 
 _engine: Engine | None = None
 
@@ -30,6 +24,22 @@ def get_engine() -> Engine:
     if _engine is None:
         _engine = create_engine_from_url(get_settings().database_url)
     return _engine
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Ensure the table exists so the API is usable before/while the ingest runs.
+    init_db(get_engine())
+    yield
+
+
+app = FastAPI(
+    title="Enova Norwegian Energy Labels",
+    version="1.0.0",
+    description="Query Norwegian building energy certificates (energikarakter A–G) "
+    "sourced from Enova's public-data API.",
+    lifespan=lifespan,
+)
 
 
 def _row_to_dict(row: Any) -> dict[str, Any]:

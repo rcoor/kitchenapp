@@ -7,6 +7,15 @@ name = "enova-energylabels"
 version = "1.0.0"
 description = "Airflow ingest + FastAPI for Norwegian energy labels (Enova energiattester)"
 requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27,<1.0",
+    "SQLAlchemy>=2.0,<2.1",
+    "psycopg[binary]>=3.1,<4.0",
+    "fastapi>=0.110,<1.0",
+    "uvicorn[standard]>=0.29,<1.0",
+    "pydantic>=2.6,<3.0",
+    "pydantic-settings>=2.2,<3.0",
+]
 
 [tool.setuptools]
 packages = ["enova", "api"]

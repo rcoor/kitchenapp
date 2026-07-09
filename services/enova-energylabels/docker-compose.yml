@@ -1,5 +1,21 @@
-# Local dev: a Postgres for the ingest to write to and the API to read from.
-# (Airflow is run separately per your platform; the DAG only needs ENOVA_* env.)
+# Full local stack for the Enova energy-label ingest + API.
+# Works natively on Apple Silicon (M1/arm64) — every image is multi-arch.
+#
+#   cp .env.example .env      # then set ENOVA_API_KEY=...
+#   docker compose up --build            # db + one-shot backfill + API
+#   # API:  http://localhost:8000/docs
+#
+# Optional scheduled orchestration (Airflow UI at http://localhost:8080):
+#   docker compose --profile airflow up --build
+name: enova-energylabels
+
+# Shared config the ingest + API both need.
+x-enova-env: &enova-env
+  ENOVA_DATABASE_URL: postgresql+psycopg://enova:enova@db:5432/enova
+  ENOVA_API_KEY: ${ENOVA_API_KEY:-}
+  ENOVA_START_YEAR: ${ENOVA_START_YEAR:-2009}   # full history; set e.g. 2025 for a quick trial
+  ENOVA_START_MONTH: ${ENOVA_START_MONTH:-1}
+
 services:
   db:
     image: postgres:16
@@ -11,16 +27,83 @@ services:
       - "5432:5432"
     volumes:
       - enova_pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/initdb.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U enova -d enova"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
+  # One-shot: back-fill every energy certificate into Postgres, then exit.
+  ingest:
+    build: .
+    command: python -m enova.ingest
+    environment:
+      <<: *enova-env
+      ENOVA_API_KEY: ${ENOVA_API_KEY:?set ENOVA_API_KEY in .env (see .env.example)}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  # Query API — creates the table on startup, so it works before/while ingest runs.
   api:
     build: .
     command: uvicorn api.main:app --host 0.0.0.0 --port 8000
-    environment:
-      ENOVA_DATABASE_URL: postgresql+psycopg://enova:enova@db:5432/enova
+    environment: *enova-env
     ports:
       - "8000:8000"
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+
+  # ---- Optional: Airflow for scheduled ingestion (profile: airflow) ---------
+  # Runs the ingest in an isolated venv (BashOperator), so Airflow's own
+  # SQLAlchemy 1.4 never clashes with this project's SQLAlchemy 2.0.
+  airflow-init:
+    profiles: ["airflow"]
+    build:
+      context: .
+      dockerfile: docker/airflow/Dockerfile
+    entrypoint: /bin/bash
+    command: -c "airflow db migrate && airflow users create -r Admin -u admin -p admin -e admin@example.com -f Admin -l User || true"
+    environment: &airflow-env
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://enova:enova@db:5432/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__SECRET_KEY: local-dev-secret
+      <<: *enova-env
+    depends_on:
+      db:
+        condition: service_healthy
+
+  airflow-scheduler:
+    profiles: ["airflow"]
+    build:
+      context: .
+      dockerfile: docker/airflow/Dockerfile
+    command: scheduler
+    environment: *airflow-env
+    volumes:
+      - ./docker/airflow/dags:/opt/airflow/dags:ro
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-webserver:
+    profiles: ["airflow"]
+    build:
+      context: .
+      dockerfile: docker/airflow/Dockerfile
+    command: webserver
+    environment: *airflow-env
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./docker/airflow/dags:/opt/airflow/dags:ro
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
 
 volumes:
   enova_pgdata:
