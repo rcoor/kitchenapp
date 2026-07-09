@@ -5,6 +5,7 @@ Airflow, the FastAPI server, and local CLI/tests. See ``.env.example``.
 """
 from __future__ import annotations
 
+from datetime import date
 from functools import lru_cache
 
 from pydantic import Field
@@ -15,39 +16,44 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="ENOVA_", env_file=".env", extra="ignore")
 
     # --- Enova public-data API (energimerkeordningen / energiattest) ---------
-    # Base URL + resource for Enova's public-data API on data.enova.no. The
-    # energy-label ("energiattest") endpoint is a POST that filters by kommune
-    # and pages the result set. Access needs a free subscription key.
-    base_url: str = "https://api.data.enova.no/ems/offentlige-data/v1"
-    endpoint: str = "Energiattest"
-    api_key: str = Field(default="", description="Ocp-Apim-Subscription-Key from data.enova.no")
+    # v2 "offentlige data" serves the full attest set as one bulk file per
+    # calendar month:  GET {base}/{endpoint}/{year}/{month}  with an x-api-key
+    # header. Fetching every year+month gives all Norwegian energy labels.
+    base_url: str = "https://api.data.enova.no/ems/offentlige-data/v2"
+    endpoint: str = "Fil"
+    api_key: str = Field(default="", description="Enova API key (sent as the x-api-key header)")
+    api_key_header: str = "x-api-key"
 
-    # Comma-separated kommune numbers to pull (the API filters by kommune).
-    # Default: Oslo. Empty string = attempt an unfiltered pull (may be rejected).
-    kommuner: str = "0301"
+    # Which months to pull: [start .. end] inclusive. end defaults to the
+    # current month, so a run always reaches the latest published file.
+    start_year: int = 2010
+    start_month: int = 1
+    end_year: int | None = None
+    end_month: int | None = None
 
-    page_size: int = 1000
-    max_pages_per_kommune: int = 50
-    max_total: int = 100_000
-    request_timeout: float = 60.0
-    # Optional dotted path to the result array if it is not at the top level.
+    request_timeout: float = 120.0
+    # 0 = unlimited; otherwise an upper safety bound on records per run.
+    max_records: int = 0
+    # Optional dotted path to the record array inside a file, if it is wrapped.
     results_path: str = ""
-
-    # Request-body field names. These are the *assumed* names for the public
-    # energiattest endpoint; the exact contract lives behind login on
-    # portal.dev.ems.enova.no. If the real docs differ, override via env
-    # (ENOVA_PARAM_*) — no code change needed.
-    param_kommune: str = "Kommunenummer"
-    param_page: str = "Side"
-    param_page_size: str = "AntallPerSide"
-    page_start: int = 1  # 1-based paging; set 0 if the API is 0-based
 
     # --- Storage -------------------------------------------------------------
     database_url: str = "postgresql+psycopg://enova:enova@localhost:5432/enova"
 
     @property
-    def kommune_list(self) -> list[str]:
-        return [k.strip() for k in self.kommuner.split(",") if k.strip()]
+    def year_months(self) -> list[tuple[int, int]]:
+        """Inclusive (year, month) pairs from start to end (default: now)."""
+        today = date.today()
+        end_y = self.end_year or today.year
+        end_m = self.end_month or today.month
+        out: list[tuple[int, int]] = []
+        y, m = self.start_year, self.start_month
+        while (y, m) <= (end_y, end_m):
+            out.append((y, m))
+            m += 1
+            if m > 12:
+                y, m = y + 1, 1
+        return out
 
 
 @lru_cache

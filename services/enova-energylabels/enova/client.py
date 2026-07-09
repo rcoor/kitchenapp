@@ -1,16 +1,22 @@
-"""HTTP client for Enova's public-data energy-label ("energiattest") API.
+"""HTTP client for Enova's public-data (v2) energy-label bulk files.
 
-The endpoint is a POST that filters by kommune and pages the result set. Each
-page is a JSON array (or an object wrapping one — several envelope keys are
-tried). Authentication is the ``Ocp-Apim-Subscription-Key`` header.
+The v2 "offentlige data" service exposes the full attest set as one file per
+calendar month::
+
+    GET {base}/{endpoint}/{year}/{month}
+    x-api-key: <key>
+
+Fetching every year+month yields all Norwegian energy labels. Each file is JSON
+(an array, or an object wrapping one) — an NDJSON fallback is also handled.
 """
 from __future__ import annotations
 
+import json
 from typing import Any, Iterator
 
 import httpx
 
-_ENVELOPE_KEYS = ("Energiattestene", "energiattester", "results", "value", "data", "items")
+_ENVELOPE_KEYS = ("Energiattestene", "energiattester", "Energiattester", "results", "value", "data", "items")
 
 
 def _get_path(obj: Any, path: str) -> Any:
@@ -24,19 +30,43 @@ def _get_path(obj: Any, path: str) -> Any:
     return cur
 
 
-def _rows_from_response(body: Any, results_path: str) -> list[dict[str, Any]]:
-    rows = _get_path(body, results_path) if results_path else body
-    if isinstance(rows, list):
-        return rows
+def parse_file_body(text: str, results_path: str = "") -> list[dict[str, Any]]:
+    """Parse a monthly file body into a list of attest records.
+
+    Handles a top-level JSON array, an object wrapping the array (several
+    envelope keys tried, or an explicit ``results_path``), and NDJSON.
+    """
+    text = text.strip()
+    if not text:
+        return []
+    try:
+        body = json.loads(text)
+    except json.JSONDecodeError:
+        # NDJSON: one JSON object per line.
+        rows = []
+        for line in text.splitlines():
+            line = line.strip()
+            if line:
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+        return [r for r in rows if isinstance(r, dict)]
+
+    if results_path:
+        picked = _get_path(body, results_path)
+        return picked if isinstance(picked, list) else []
+    if isinstance(body, list):
+        return [r for r in body if isinstance(r, dict)]
     if isinstance(body, dict):
         for key in _ENVELOPE_KEYS:
             if isinstance(body.get(key), list):
-                return body[key]
+                return [r for r in body[key] if isinstance(r, dict)]
     return []
 
 
 class EnovaClient:
-    """Pages through Enova energy certificates for one or more kommuner."""
+    """Downloads Enova monthly energy-label files."""
 
     def __init__(
         self,
@@ -44,61 +74,40 @@ class EnovaClient:
         endpoint: str,
         api_key: str,
         *,
-        page_size: int = 1000,
-        max_pages: int = 50,
-        timeout: float = 60.0,
+        api_key_header: str = "x-api-key",
+        timeout: float = 120.0,
         results_path: str = "",
-        param_kommune: str = "Kommunenummer",
-        param_page: str = "Side",
-        param_page_size: str = "AntallPerSide",
-        page_start: int = 1,
         client: httpx.Client | None = None,
     ) -> None:
-        self.url = f"{base_url.rstrip('/')}/{endpoint.lstrip('/')}"
+        self.base = f"{base_url.rstrip('/')}/{endpoint.strip('/')}"
         self.api_key = api_key
-        self.page_size = page_size
-        self.max_pages = max_pages
+        self.api_key_header = api_key_header
         self.results_path = results_path
-        self.param_kommune = param_kommune
-        self.param_page = param_page
-        self.param_page_size = param_page_size
-        self.page_start = page_start
         self._client = client or httpx.Client(timeout=timeout)
 
     @property
     def _headers(self) -> dict[str, str]:
         return {
-            "Content-Type": "application/json",
             "Accept": "application/json",
-            "Ocp-Apim-Subscription-Key": self.api_key,
+            "Cache-Control": "no-cache",
+            self.api_key_header: self.api_key,
         }
 
-    def iter_attester(self, kommunenummer: str | None) -> Iterator[dict[str, Any]]:
-        """Yield raw attest records for a kommune, following pagination."""
-        for i in range(self.max_pages):
-            page = self.page_start + i
-            body: dict[str, Any] = {self.param_page: page, self.param_page_size: self.page_size}
-            if kommunenummer:
-                body[self.param_kommune] = kommunenummer
-            first_page = i == 0
+    def iter_month(self, year: int, month: int) -> Iterator[dict[str, Any]]:
+        """Yield raw attest records for one year+month file.
 
-            resp = self._client.post(self.url, json=body, headers=self._headers)
-            if resp.status_code >= 400:
-                # A failure on the very first page is fatal (bad key / bad schema);
-                # a later-page failure just ends pagination for this kommune.
-                if first_page:
-                    raise EnovaApiError(
-                        f"Enova API {resp.status_code} for kommune "
-                        f"{kommunenummer or '(all)'}: {resp.text[:200]}"
-                    )
-                return
-
-            rows = _rows_from_response(resp.json(), self.results_path)
-            if not rows:
-                return
-            yield from rows
-            if len(rows) < self.page_size:
-                return  # short page => last page
+        A 404 means "no file for that month" (e.g. a future month) and yields
+        nothing. 401/403 is fatal (bad/missing key). Other errors raise too.
+        """
+        url = f"{self.base}/{year}/{month}"
+        resp = self._client.get(url, headers=self._headers)
+        if resp.status_code == 404:
+            return
+        if resp.status_code in (401, 403):
+            raise EnovaApiError(f"Enova API {resp.status_code} (auth) for {url}: {resp.text[:200]}")
+        if resp.status_code >= 400:
+            raise EnovaApiError(f"Enova API {resp.status_code} for {url}: {resp.text[:200]}")
+        yield from parse_file_body(resp.text, self.results_path)
 
     def close(self) -> None:
         self._client.close()

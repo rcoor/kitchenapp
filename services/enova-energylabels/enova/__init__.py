@@ -1,13 +1,14 @@
 """Enova Norwegian energy-label ingest + storage package."""
-from .client import EnovaApiError, EnovaClient
+from .client import EnovaApiError, EnovaClient, parse_file_body
 from .db import create_engine_from_url, energy_labels, init_db, upsert_labels
 from .extract import extract_label
-from .ingest import IngestResult, ingest_kommune, run_ingest
+from .ingest import IngestResult, build_client, ingest_month, run_ingest
 from .settings import Settings, get_settings
 
 __all__ = [
     "EnovaApiError",
     "EnovaClient",
+    "parse_file_body",
     "Settings",
     "get_settings",
     "extract_label",
@@ -16,6 +17,7 @@ __all__ = [
     "init_db",
     "upsert_labels",
     "run_ingest",
-    "ingest_kommune",
+    "build_client",
+    "ingest_month",
     "IngestResult",
 ]
