@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "enova-energylabels"
+version = "1.0.0"
+description = "Airflow ingest + FastAPI for Norwegian energy labels (Enova energiattester)"
+requires-python = ">=3.11"
+
+[tool.setuptools]
+packages = ["enova", "api"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

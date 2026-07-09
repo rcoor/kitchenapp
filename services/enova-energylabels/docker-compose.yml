@@ -1,0 +1,26 @@
+# Local dev: a Postgres for the ingest to write to and the API to read from.
+# (Airflow is run separately per your platform; the DAG only needs ENOVA_* env.)
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: enova
+      POSTGRES_PASSWORD: enova
+      POSTGRES_DB: enova
+    ports:
+      - "5432:5432"
+    volumes:
+      - enova_pgdata:/var/lib/postgresql/data
+
+  api:
+    build: .
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000
+    environment:
+      ENOVA_DATABASE_URL: postgresql+psycopg://enova:enova@db:5432/enova
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+
+volumes:
+  enova_pgdata:
